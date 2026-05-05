@@ -4,8 +4,12 @@ const nextConfig = {
   turbopack: {},
   // Allow cross-origin requests from emulator
   allowedDevOrigins: ['10.0.2.2', 'localhost', '192.168.0.5'],
-  // Enable CORS for development
+  // Enable CORS only in development
   async headers() {
+    if (process.env.NODE_ENV === 'production') {
+      return []
+    }
+
     return [
       {
         source: '/:path*',

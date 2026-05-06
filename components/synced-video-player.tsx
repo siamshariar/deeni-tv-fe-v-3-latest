@@ -2596,10 +2596,6 @@ export function SyncedVideoPlayer({
     }, 3000)
   }, [])
 
-  const handlePlaybackToggle = useCallback(() => {
-    if (!playerReady || !currentProgram || isLoading || showStartScreen || !!apiError) return
-  }, [apiError, currentProgram, isLoading, playerReady, showStartScreen])
-
   useEffect(() => {
     if (showStartScreen || isLoading || !!apiError) return
 

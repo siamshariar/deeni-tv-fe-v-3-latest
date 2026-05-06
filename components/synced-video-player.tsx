@@ -770,7 +770,6 @@ export function SyncedVideoPlayer({
   const [showPreviousModal, setShowPreviousModal] = useState(false)
   const [previousVideos, setPreviousVideos] = useState<VideoProgram[]>([])
   const [showProgramOverlay, setShowProgramOverlay] = useState(false)
-  const [mainPlayerPaused, setMainPlayerPaused] = useState(false)
   const [showAutoUnmuteNotification, setShowAutoUnmuteNotification] = useState(false)
   const [isVolumeControlsLocked, setIsVolumeControlsLocked] = useState(true)
   
@@ -2597,6 +2596,10 @@ export function SyncedVideoPlayer({
     }, 3000)
   }, [])
 
+  const handlePlaybackToggle = useCallback(() => {
+    if (!playerReady || !currentProgram || isLoading || showStartScreen || !!apiError) return
+  }, [apiError, currentProgram, isLoading, playerReady, showStartScreen])
+
   useEffect(() => {
     if (showStartScreen || isLoading || !!apiError) return
 
@@ -3006,13 +3009,11 @@ export function SyncedVideoPlayer({
           // MUTE main player when watching from history (don't destroy)
           setYouTubeMuted(true)
           setIsMuted(true)
-          setMainPlayerPaused(true)
         }}
         onResumeMainPlayer={() => {
           // UNMUTE main player when history video closes
           setYouTubeMuted(false)
           setIsMuted(false)
-          setMainPlayerPaused(false)
           // Do NOT close the Previous Programs modal - it stays open
           // Do NOT reload or restart the live TV
         }}

@@ -1,7 +1,7 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Clock, History, Play, ArrowLeft, Volume2, Volume1, Volume, VolumeX } from 'lucide-react'
+import { X, Clock, History, Play, Pause, ArrowLeft, Volume2, Volume1, Volume, VolumeX } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { VideoProgram } from '@/types/schedule'
@@ -234,7 +234,10 @@ const VideoPlayerModal = ({
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [playerLoaded, setPlayerLoaded] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [showPlaybackOverlay, setShowPlaybackOverlay] = useState(false)
   const hideVolumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const playbackOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // ── iOS detection ──
   const isIOS = useMemo(() => {
@@ -250,22 +253,42 @@ const VideoPlayerModal = ({
   // instance inside the user-gesture window, which iOS accepts.
   const [hasStarted, setHasStarted] = useState(false)
 
+  const clearPlaybackOverlayTimer = useCallback(() => {
+    if (playbackOverlayTimerRef.current) {
+      clearTimeout(playbackOverlayTimerRef.current)
+      playbackOverlayTimerRef.current = null
+    }
+  }, [])
+
+  const showPlaybackOverlayTemporarily = useCallback((delayMs: number = 900) => {
+    setShowPlaybackOverlay(true)
+    clearPlaybackOverlayTimer()
+    playbackOverlayTimerRef.current = setTimeout(() => {
+      setShowPlaybackOverlay(false)
+    }, delayMs)
+  }, [clearPlaybackOverlayTimer])
+
   const handleiOSPlay = useCallback(() => {
     try {
       ytPlayerRef.current?.playVideo()
     } catch {}
     setHasStarted(true)
-  }, [])
+    setIsPlaying(true)
+    showPlaybackOverlayTemporarily()
+  }, [showPlaybackOverlayTemporarily])
 
   // Reset hasStarted when modal opens / video changes
   useEffect(() => {
     if (isOpen) {
       setHasStarted(false)
       setPlayerLoaded(false)
+      setIsPlaying(false)
+      setShowPlaybackOverlay(false)
       setCurrentTime(0)
       setDuration(0)
+      clearPlaybackOverlayTimer()
     }
-  }, [isOpen, video?.videoId])
+  }, [isOpen, video?.videoId, clearPlaybackOverlayTimer])
 
   // Format seconds → M:SS or H:MM:SS
   const fmtTime = (sec: number): string => {
@@ -333,6 +356,8 @@ const VideoPlayerModal = ({
               // On non-iOS, autoplay immediately; on iOS we wait for user tap
               if (!isIOS) {
                 event.target.playVideo()
+                setIsPlaying(true)
+                showPlaybackOverlayTemporarily()
               }
               const d = event.target.getDuration()
               if (typeof d === 'number' && d > 0) setDuration(d)
@@ -343,10 +368,14 @@ const VideoPlayerModal = ({
           onStateChange: (event: any) => {
             if (destroyed) return
             if (event.data === 1 || event.data === 5) {
+              setIsPlaying(true)
               try {
                 const d = ytPlayerRef.current?.getDuration?.() ?? 0
                 if (d > 0) setDuration(d)
               } catch {}
+            }
+            if (event.data === 2) {
+              setIsPlaying(false)
             }
           },
         },
@@ -430,6 +459,26 @@ const VideoPlayerModal = ({
       return newMuted
     })
   }, [])
+
+  const togglePlayback = useCallback(() => {
+    if (!playerLoaded || !ytPlayerRef.current) return
+
+    if (isPlaying) {
+      try {
+        ytPlayerRef.current.pauseVideo?.()
+      } catch {}
+      setIsPlaying(false)
+      setShowPlaybackOverlay(true)
+      clearPlaybackOverlayTimer()
+      return
+    }
+
+    try {
+      ytPlayerRef.current.playVideo?.()
+    } catch {}
+    setIsPlaying(true)
+    showPlaybackOverlayTemporarily()
+  }, [clearPlaybackOverlayTimer, isPlaying, playerLoaded, showPlaybackOverlayTemporarily])
 
   // Mobile: first tap shows slider; subsequent taps while visible toggle mute
   const handleVolumeIconClick = useCallback(() => {
@@ -517,7 +566,34 @@ const VideoPlayerModal = ({
               {/* Video container — YT Player API injects iframe here */}
               <div className="relative w-full aspect-video bg-black overflow-hidden border-x border-white/10 select-none">
                 <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-                <div className="absolute inset-0 w-full h-full pointer-events-auto z-10" />
+
+                {/* Transparent click wrapper for play/pause toggle */}
+                <button
+                  type="button"
+                  onClick={togglePlayback}
+                  className="absolute inset-0 z-20 w-full h-full cursor-pointer"
+                  aria-label={isPlaying ? 'Pause previous program video' : 'Play previous program video'}
+                >
+                  <AnimatePresence>
+                    {(showPlaybackOverlay || !isPlaying) && playerLoaded && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.96 }}
+                        transition={{ duration: 0.18 }}
+                        className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[1px]"
+                      >
+                        <div className="flex h-20 w-20 items-center justify-center rounded-full border border-white/20 bg-black/45 text-white shadow-2xl shadow-black/30 md:h-24 md:w-24">
+                          {isPlaying ? (
+                            <Pause className="h-9 w-9 fill-white md:h-10 md:w-10" />
+                          ) : (
+                            <Play className="h-9 w-9 fill-white md:h-10 md:w-10" />
+                          )}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </button>
 
                 {/* Branded loading overlay — shown until player is ready */}
                 <BrandedLoadingOverlay isVisible={!playerLoaded} programName={video.title} />

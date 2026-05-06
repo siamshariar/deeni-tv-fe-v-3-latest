@@ -617,6 +617,17 @@ export function useYouTubePlayer() {
     } catch (err) {}
     return false
   }, [])
+
+  const pause = useCallback(() => {
+    if (!playerRef.current) return false
+    try {
+      if (typeof playerRef.current.pauseVideo === 'function') {
+        playerRef.current.pauseVideo()
+        return true
+      }
+    } catch (err) {}
+    return false
+  }, [])
   
   const seekTo = useCallback((seconds: number, allowSeekAhead: boolean = true) => {
     if (!playerRef.current) return false
@@ -704,6 +715,7 @@ export function useYouTubePlayer() {
     getCurrentTime,
     getCurrentVideoId,
     getIsMuted,
+    pause,
     destroy
   }
 }

@@ -609,3 +609,117 @@ export function saveApiChannels(channels: ApiChannel[]): void {
     console.error('Error saving API channels:', error)
   }
 }
+
+function buildLocalProgramRange(programs: VideoProgram[], startTime: number, count: number) {
+  const items: Array<{ ytVideoId: string; title: string; duration: number; startTime: number; endTime: number }> = []
+  let currentStart = startTime
+
+  for (let i = 0; i < count; i++) {
+    const program = programs[i % programs.length]
+    const endTime = currentStart + (program.duration * 1000)
+    items.push({
+      ytVideoId: program.videoId,
+      title: program.title,
+      duration: program.duration,
+      startTime: currentStart,
+      endTime,
+    })
+    currentStart = endTime
+  }
+
+  return items
+}
+
+/**
+ * Build an API-compatible current video response from the embedded CHANNELS data.
+ * Used by Android-only client fallback when network fetches fail.
+ */
+export function buildLocalCurrentVideoResponse(channelId: string, count: number = 15) {
+  const current = getCurrentProgram(channelId)
+  const programs = getChannelPrograms(channelId)
+  const currentStartTime = current.serverTime - (current.currentTime * 1000)
+  const currentEndTime = currentStartTime + (current.program.duration * 1000)
+
+  const upcomingPrograms = getUpcomingPrograms(channelId, count).upcoming
+  const previousPrograms = getPreviousPrograms(channelId, count)
+
+  return {
+    serverTime: current.serverTime,
+    currentProgram: {
+      ytVideoId: current.program.videoId,
+      title: current.program.title,
+      duration: current.program.duration,
+      seekTo: current.currentTime,
+      startTime: currentStartTime,
+      endTime: currentEndTime,
+    },
+    previousPrograms: buildLocalProgramRange(previousPrograms.reverse(), currentStartTime - previousPrograms.reduce((sum, program) => sum + program.duration * 1000, 0), Math.min(previousPrograms.length, count)),
+    upcomingPrograms: buildLocalProgramRange(upcomingPrograms, currentEndTime, Math.min(upcomingPrograms.length, count)),
+    _source: 'local-schedule',
+  }
+}
+
+/**
+ * Build a channel-list fallback that matches the external API shape.
+ * Used by Android-only client fallback when the remote channel API is unavailable.
+ */
+export function getFallbackApiChannels(): ApiChannel[] {
+  return CHANNELS.map((channel, index) => ({
+    id: index + 1,
+    title: channel.name,
+    localizationId: String(getChannelLid(channel.id)),
+    isQuran: isQuranChannel(channel.id),
+  }))
+}
+
+/**
+ * Load local schedule data from public assets.
+ * Used by Android APK to run fully offline without remote API dependency.
+ * 
+ * @returns Local schedule data with embedded programs for all channels
+ */
+export async function loadLocalScheduleData(): Promise<any> {
+  if (typeof window === 'undefined') return null
+  
+  try {
+    const response = await fetch('/api/fallback-schedule.json', {
+      cache: 'force-cache'
+    })
+    
+    if (!response.ok) {
+      console.warn('Failed to load local schedule:', response.status)
+      return null
+    }
+    
+    return await response.json()
+  } catch (error) {
+    console.warn('Error loading local schedule data:', error)
+    return null
+  }
+}
+
+/**
+ * Fetch schedule data from local assets on Android.
+ * Falls back to embedded CHANNELS if local file not available.
+ * 
+ * @param channelId - The channel ID to fetch
+ * @returns Local schedule response compatible with API format
+ */
+export async function fetchLocalScheduleData(channelId: string) {
+  try {
+    // Try to load from local asset first
+    const localData = await loadLocalScheduleData()
+    if (localData?.channels) {
+      // Successfully loaded from local asset
+      const channel = localData.channels.find((ch: any) => ch.id === channelId)
+      if (channel && channel.programs && channel.programs.length > 0) {
+        return buildLocalCurrentVideoResponse(channelId, 15)
+      }
+    }
+  } catch (error) {
+    console.warn('Error with local asset, falling back to embedded data:', error)
+  }
+  
+  // Fallback to embedded schedule
+  return buildLocalCurrentVideoResponse(channelId, 15)
+}

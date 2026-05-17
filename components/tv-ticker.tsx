@@ -1,10 +1,24 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { motion } from 'framer-motion'
 import { Clock, ArrowRight } from 'lucide-react'
 import { CurrentVideoData, VideoProgram } from '@/types/schedule'
-import { formatTime, formatDuration } from '@/lib/schedule-utils'
+import { formatTime, formatDuration, buildLocalCurrentVideoResponse } from '@/lib/schedule-utils'
+
+async function parseJsonSafely(response: Response) {
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    return response.json()
+  }
+  const text = await response.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
 
 interface TVTickerProps {
   isVisible?: boolean
@@ -17,6 +31,52 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
   const [currentData, setCurrentData] = useState<CurrentVideoData | null>(null)
   const [timeRemaining, setTimeRemaining] = useState<number>(0)
   const [upcomingVideos, setUpcomingVideos] = useState<VideoProgram[]>([])
+  const isAndroid = typeof window !== 'undefined' && Capacitor.getPlatform() === 'android'
+
+  const applyLocalFallback = () => {
+    const data = buildLocalCurrentVideoResponse('bangla-1')
+    setCurrentData({
+      program: {
+        id: data.currentProgram.ytVideoId,
+        videoId: data.currentProgram.ytVideoId,
+        title: data.currentProgram.title,
+        description: data.currentProgram.title,
+        duration: data.currentProgram.duration,
+        category: 'Lecture',
+        language: 'Bengali',
+        channelId: 'bangla-1',
+      } as VideoProgram,
+      currentTime: data.currentProgram.seekTo,
+      timeRemaining: data.currentProgram.duration - data.currentProgram.seekTo,
+      nextProgram: {
+        id: data.upcomingPrograms[0]?.ytVideoId || data.currentProgram.ytVideoId,
+        videoId: data.upcomingPrograms[0]?.ytVideoId || data.currentProgram.ytVideoId,
+        title: data.upcomingPrograms[0]?.title || data.currentProgram.title,
+        description: data.upcomingPrograms[0]?.title || data.currentProgram.title,
+        duration: data.upcomingPrograms[0]?.duration || data.currentProgram.duration,
+        category: 'Lecture',
+        language: 'Bengali',
+        channelId: 'bangla-1',
+      } as VideoProgram,
+      serverTime: data.serverTime,
+      programIndex: 0,
+      epochStart: 0,
+      nextProgramStartTime: data.currentProgram.endTime,
+      totalPrograms: Math.max(1, data.upcomingPrograms.length + 1),
+      channelId: 'bangla-1',
+    } as any)
+    setTimeRemaining(data.currentProgram.duration - data.currentProgram.seekTo)
+    setUpcomingVideos((data.upcomingPrograms || []).map((program: any) => ({
+      id: program.ytVideoId,
+      videoId: program.ytVideoId,
+      title: program.title,
+      description: program.title,
+      duration: program.duration,
+      category: 'Lecture',
+      language: 'Bengali',
+      channelId: 'bangla-1',
+    })))
+  }
 
   // Use prop data if provided, otherwise fetch
   useEffect(() => {
@@ -27,14 +87,26 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
       // Fallback to fetching if no prop data
       const fetchData = async () => {
         try {
+          if (isAndroid) {
+            applyLocalFallback()
+            return
+          }
+
           const response = await fetch('/api/current-video')
-          const result = await response.json()
+          const result = await parseJsonSafely(response)
           if (result.success && result.data) {
             setCurrentData(result.data)
             setTimeRemaining(result.data.timeRemaining)
+            return
+          }
+          if (isAndroid) {
+            applyLocalFallback()
           }
         } catch (error) {
           console.error('Error fetching ticker data:', error)
+          if (isAndroid) {
+            applyLocalFallback()
+          }
         }
       }
 
@@ -49,13 +121,25 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
   useEffect(() => {
     const fetchUpcoming = async () => {
       try {
+        if (isAndroid) {
+          applyLocalFallback()
+          return
+        }
+
         const response = await fetch('/api/upcoming-videos?count=5')
-        const result = await response.json()
+        const result = await parseJsonSafely(response)
         if (result.success && result.data) {
           setUpcomingVideos(result.data.upcoming)
+            return
+          }
+          if (isAndroid) {
+            applyLocalFallback()
         }
       } catch (error) {
         console.error('Error fetching upcoming videos:', error)
+          if (isAndroid) {
+            applyLocalFallback()
+          }
       }
     }
 
@@ -63,7 +147,7 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
     const interval = setInterval(fetchUpcoming, 60000) // Update every minute
 
     return () => clearInterval(interval)
-  }, [])
+  }, [isAndroid])
 
   // Update time remaining when prop changes
   useEffect(() => {
@@ -289,12 +373,17 @@ function ScrollingText({ text }: { text: string }) {
  */
 export function TVTickerMini({ className = '' }: { className?: string }) {
   const [currentData, setCurrentData] = useState<CurrentVideoData | null>(null)
+  const isAndroid = typeof window !== 'undefined' && Capacitor.getPlatform() === 'android'
 
   useEffect(() => {
     const fetchData = async () => {
       try {
+        if (isAndroid) {
+          return
+        }
+
         const response = await fetch('/api/current-video')
-        const result = await response.json()
+        const result = await parseJsonSafely(response)
         if (result.success && result.data) {
           setCurrentData(result.data)
         }

@@ -48,6 +48,7 @@ interface SyncedVideoPlayerProps {
   onOpenSchedule?: () => void
   openChannelSelectorModal?: boolean
   onChannelSelectorModalClose?: () => void
+  hasUserSelectedChannel?: boolean
   /** Called whenever the current program / schedule changes (video transition, API sync, etc.) */
   onProgramChange?: (currentProgramId: string, schedule: VideoProgram[]) => void
   /** Increment this counter to trigger a channel reload (e.g. from the Reload menu option) */
@@ -750,12 +751,21 @@ export function SyncedVideoPlayer({
   onProgramChange,
   triggerReload = 0
 }: SyncedVideoPlayerProps) {
-  const isIOS = useMemo(() => {
-    if (typeof navigator === 'undefined') return false
-    return (
+  const [isIOS, setIsIOS] = useState(false)
+  const [isPlatformReady, setIsPlatformReady] = useState(false)
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined') return
+
+    setIsIOS(
       /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
     )
+    setIsPlatformReady(true)
+  }, [])
+
+  useEffect(() => {
+    setHasMounted(true)
   }, [])
 
   // UI State
@@ -772,6 +782,7 @@ export function SyncedVideoPlayer({
   const [showProgramOverlay, setShowProgramOverlay] = useState(false)
   const [showAutoUnmuteNotification, setShowAutoUnmuteNotification] = useState(false)
   const [isVolumeControlsLocked, setIsVolumeControlsLocked] = useState(true)
+  const [hasMounted, setHasMounted] = useState(false)
   
   // Branded loading overlay state - event-based, not timer-based
   const [showBrandedOverlay, setShowBrandedOverlay] = useState(false)
@@ -2220,13 +2231,14 @@ export function SyncedVideoPlayer({
 
   // Auto-start on web/android. iOS waits for explicit Start button click.
   useEffect(() => {
+    if (!isPlatformReady) return
     if (isIOS) return
     if (!currentChannelId) return
     if (showStartScreen) return
     if (playerReady || isLoading || currentProgram || apiError) return
 
     loadChannel(currentChannelId, { preferUnmutedStart: true })
-  }, [isIOS, currentChannelId, showStartScreen, playerReady, isLoading, currentProgram, apiError, loadChannel])
+  }, [isPlatformReady, isIOS, currentChannelId, showStartScreen, playerReady, isLoading, currentProgram, apiError, loadChannel])
 
   // Trigger reload when parent increments the counter (e.g. Reload menu option)
   useEffect(() => {
@@ -2951,7 +2963,7 @@ export function SyncedVideoPlayer({
   )}
 </div>
 
-                {[
+                {hasMounted && [
                   { icon: Calendar, onClick: () => onOpenSchedule?.(), title: "Programs Schedule" },
                   { icon: History, onClick: () => setShowPreviousModal(true), title: 'Watched Program' },
                   { icon: Globe, onClick: () => handleOpenChannelSelector(), title: 'Channel' },

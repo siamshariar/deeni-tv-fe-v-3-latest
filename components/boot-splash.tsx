@@ -1,22 +1,17 @@
 export function BootSplash() {
   return (
-    <div className="fixed inset-0 z-[100] flex min-h-screen items-center justify-center overflow-hidden bg-[#09090b] px-6 text-center text-white">
-      <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(34,197,94,0.12),transparent_40%)]" />
-      <div className="relative flex flex-col items-center gap-6">
+    <div className="fixed inset-0 z-[100] flex min-h-[100dvh] items-center justify-center overflow-hidden bg-[#09090b] px-6 text-center text-white">
+      <div className="absolute inset-0 opacity-0" />
+      <div className="relative flex flex-col items-center justify-center gap-0">
         <img
-          src="/Deenitv-Transparent-logo.png"
-          alt="Deeni.tv"
-          className="w-[min(86vw,560px)] select-none drop-shadow-[0_18px_48px_rgba(0,0,0,0.5)]"
+          src="/favicon-192x192.png"
+          alt="Deeni.tv Logo"
+          className="w-[clamp(60px,15vw,120px)] h-[clamp(60px,15vw,120px)] select-none mb-4"
           draggable="false"
         />
-        <div className="space-y-2">
-          <p className="text-sm font-semibold uppercase tracking-[0.4em] text-white/70 sm:text-base">
-            Deeni.tv
-          </p>
-          <p className="text-sm text-white/80 sm:text-base">
-            Loading your spiritual TV experience
-          </p>
-        </div>
+        <p className="text-white font-bold tracking-wider text-[clamp(1.2rem,3vw,2rem)]">
+          Deeni.tv
+        </p>
       </div>
     </div>
   )

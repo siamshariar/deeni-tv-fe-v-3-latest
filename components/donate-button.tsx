@@ -15,7 +15,11 @@ export function DonateButton() {
     fetchedRef.current = true
 
     fetch('/api/donation-url', { cache: 'no-store' })
-      .then(res => res.json())
+      .then(async (res) => {
+        const contentType = res.headers.get('content-type') || ''
+        if (!contentType.includes('application/json')) return null
+        return res.json()
+      })
       .then(data => { if (data?.url) setDonationUrl(data.url) })
       .catch(() => { /* keep DEFAULT_URL on any error */ })
   }, [])

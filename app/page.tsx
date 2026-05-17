@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { SyncedVideoPlayer } from '@/components/synced-video-player'
 import { MenuDrawer, MenuOption } from '@/components/menu-drawer'
 import { DonateButton } from '@/components/donate-button'
@@ -8,7 +9,7 @@ import { ScheduleModal } from '@/components/schedule-modal'
 import { AboutModal } from '@/components/about-modal'
 import { ChannelSelector } from '@/components/channel-selector'
 import { VideoProgram } from '@/types/schedule'
-import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels } from '@/lib/schedule-utils'
+import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels, getFallbackApiChannels } from '@/lib/schedule-utils'
 import { clientFetchWithAuth } from '@/lib/client-fetch'
 
 export default function Home() {
@@ -19,9 +20,10 @@ export default function Home() {
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
     )
   }, [])
+  const isAndroid = useMemo(() => typeof window !== 'undefined' && Capacitor.getPlatform() === 'android', [])
 
-  const [activeChannelId, setActiveChannelId] = useState<string>('')
-  const [apiChannels, setApiChannels] = useState<ApiChannel[]>([])
+  const [activeChannelId, setActiveChannelId] = useState<string | undefined>(undefined)
+  const [apiChannels, setApiChannels] = useState<ApiChannel[]>(() => isAndroid ? getFallbackApiChannels() : [])
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isChannelSelectorOpen, setIsChannelSelectorOpen] = useState(false)
   const [isFirstTimeUser, setIsFirstTimeUser] = useState(false)
@@ -49,12 +51,14 @@ export default function Home() {
       // iOS needs a user gesture for reliable audio; others auto-start.
       setShowStartModal(isIOS)
     } else {
-      // First time user - show channel selector immediately (must select)
+      // First time user - open channel selector immediately (do not wait)
       setIsFirstTimeUser(true)
       setIsChannelSelectorOpen(true)
     }
     setIsLoading(false)
-  }, [isIOS])
+    // Run only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Fetch channel list for the ChannelSelector when it opens (first-time users)
   useEffect(() => {
@@ -70,16 +74,19 @@ export default function Home() {
         }
       } catch { /* ignore */ }
       // Fallback: Next.js route (uses static data on STG)
-      try {
-        const res = await fetch('/api/tv-channels')
-        const json = await res.json()
-        if (json?.data?.length) {
-          saveApiChannels(json.data)
-          setApiChannels(json.data)
-        }
-      } catch { /* ignore */ }
+      if (!isAndroid) {
+        try {
+          const res = await fetch('/api/tv-channels')
+          const contentType = res.headers.get('content-type') || ''
+          const json = contentType.includes('application/json') ? await res.json() : null
+          if (json?.data?.length) {
+            saveApiChannels(json.data)
+            setApiChannels(json.data)
+          }
+        } catch { /* ignore */ }
+      }
     })()
-  }, [isChannelSelectorOpen, apiChannels.length])
+  }, [isChannelSelectorOpen, apiChannels.length, isAndroid])
 
   // Called by SyncedVideoPlayer whenever the current program / schedule changes
   // (video ended → next started, API sync, queue shift, etc.)
@@ -140,10 +147,6 @@ export default function Home() {
     setIsChannelSelectorOpen(false)
   }
 
-  if (isLoading) {
-    return <main className="relative min-h-screen bg-zinc-950" />
-  }
-
   return (
     <main className="relative min-h-screen bg-zinc-950">
       {/* Logo Header - Commented out per requirements */}
@@ -172,6 +175,7 @@ export default function Home() {
         onChannelSelectorModalClose={() => setOpenChannelSelectorModal(false)}
         onProgramChange={handleProgramChange}
         triggerReload={reloadCounter}
+        hasUserSelectedChannel={!!activeChannelId}
       />
       
       {/* Menu Drawer - Slides from bottom */}

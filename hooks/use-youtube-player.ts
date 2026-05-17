@@ -33,7 +33,7 @@ declare global {
 const IOS_PRIMER_VIDEO_ID = 'flt8T_0CD1A'
 const YT_EMBED_HOST = 'https://www.youtube.com'
 
-export function useYouTubePlayer() {
+export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true }) {
   const playerRef = useRef<any>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const playerMountCounterRef = useRef<number>(0)
@@ -196,13 +196,13 @@ export function useYouTubePlayer() {
     return apiLoadPromiseRef.current
   }, [])
 
-  // ── Pre-load the YouTube iframe API as soon as the hook mounts ──
-  // This ensures window.YT is ready before the user taps any button,
-  // keeping player creation (new YT.Player) inside the user-gesture window
-  // on iOS Safari, which blocks autoplay if triggered outside a gesture.
+  // Conditionally pre-load the YouTube iframe API on mount. Disabled by
+  // default in components that need to delay API injection until user
+  // interaction (e.g. channel selection) to avoid creating iframes early.
   useEffect(() => {
+    if (opts.autoLoad === false) return
     loadYouTubeAPI().catch(() => {}) // fire-and-forget; errors handled per-init
-  }, [loadYouTubeAPI])
+  }, [loadYouTubeAPI, opts.autoLoad])
   
   const initializePlayer = useCallback(async (options: YouTubePlayerOptions) => {
     if (!containerRef.current) return
@@ -491,6 +491,9 @@ export function useYouTubePlayer() {
     } catch (_) {}
   }, [])
 
+  // Expose the raw loader so callers can opt-in to loading the API on-demand
+  const prepareApi = useCallback(() => loadYouTubeAPI(), [loadYouTubeAPI])
+
   // ── setPlayerCallbacks ──────────────────────────────────────────────────────
   // Swap the delegating-ref event handlers that the primed player calls.
   // Call this BEFORE loadVideoById so that state-change events from the real
@@ -706,6 +709,7 @@ export function useYouTubePlayer() {
     setPlayerCallbacks,
     isPrimedRef,
     loadVideo,
+    prepareApi,
     muteForTransition,
     getDuration,
     setVolume,

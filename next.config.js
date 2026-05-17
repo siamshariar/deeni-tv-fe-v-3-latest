@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
+const isStaticExport = process.env.STATIC_EXPORT === 'true'
+
 const nextConfig = {
+  // Keep API routes enabled by default.
+  // Set STATIC_EXPORT=true only when you intentionally want a static export build.
+  ...(isStaticExport ? { output: 'export' } : {}),
   // Add turbopack config to silence warning
   turbopack: {},
   // Allow cross-origin requests from emulator

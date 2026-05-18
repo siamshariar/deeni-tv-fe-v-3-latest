@@ -30,6 +30,7 @@ export function DonateButton() {
 
   return (
     <div className="fixed right-2 sm:right-4 z-50 flex items-center"
+      suppressHydrationWarning
       style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}
     >
       {/* Donate Button - Shows on all screens including mobile */}

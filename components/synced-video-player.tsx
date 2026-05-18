@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Volume2, VolumeX, Maximize, MoreHorizontal, Minimize, 
@@ -33,9 +34,34 @@ import {
   ApiChannel,
   getStoredApiChannels,
   saveApiChannels,
+  getFallbackApiChannels,
+  buildLocalCurrentVideoResponse,
 } from '@/lib/schedule-utils'
 import { useYouTubePlayer, YT_STATE } from '@/hooks/use-youtube-player'
 import { PreviousVideosModal } from './previous-videos-modal'
+
+async function parseJsonSafely(response: Response) {
+  const contentType = response.headers.get('content-type') || ''
+
+  if (contentType.includes('application/json')) {
+    try {
+      return await response.json()
+    } catch {
+      return null
+    }
+  }
+
+  try {
+    const text = await response.text()
+    return JSON.parse(text)
+  } catch {
+    return null
+  }
+}
+
+function buildEmbeddedScheduleFallback(channelId: string) {
+  return buildLocalCurrentVideoResponse(channelId, 15)
+}
 
 interface SyncedVideoPlayerProps {
   onMenuOpen: () => void
@@ -48,6 +74,7 @@ interface SyncedVideoPlayerProps {
   onOpenSchedule?: () => void
   openChannelSelectorModal?: boolean
   onChannelSelectorModalClose?: () => void
+  onReloadStart?: () => void
   hasUserSelectedChannel?: boolean
   /** Called whenever the current program / schedule changes (video transition, API sync, etc.) */
   onProgramChange?: (currentProgramId: string, schedule: VideoProgram[]) => void
@@ -748,19 +775,27 @@ export function SyncedVideoPlayer({
   onOpenSchedule,
   openChannelSelectorModal = false,
   onChannelSelectorModalClose,
+  onReloadStart,
   onProgramChange,
   triggerReload = 0
 }: SyncedVideoPlayerProps) {
   const [isIOS, setIsIOS] = useState(false)
+  const [isAndroid, setIsAndroid] = useState(false)
   const [isPlatformReady, setIsPlatformReady] = useState(false)
 
   useEffect(() => {
     if (typeof navigator === 'undefined') return
 
-    setIsIOS(
+    const isApple =
       /iPad|iPhone|iPod/.test(navigator.userAgent) ||
       (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    )
+    
+    const isAndroidDevice =
+      Capacitor.getPlatform() === 'android' ||
+      /Android/.test(navigator.userAgent)
+    
+    setIsIOS(isApple)
+    setIsAndroid(isAndroidDevice)
     setIsPlatformReady(true)
   }, [])
 
@@ -904,7 +939,12 @@ export function SyncedVideoPlayer({
   // Load stored API channels from localStorage on mount
   useEffect(() => {
     const stored = getStoredApiChannels()
-    if (stored.length > 0) setApiChannels(stored)
+    if (stored.length > 0) {
+      setApiChannels(stored)
+      return
+    }
+
+    setApiChannels(getFallbackApiChannels())
   }, [])
 
   // Load previous videos when channel changes
@@ -1298,11 +1338,14 @@ export function SyncedVideoPlayer({
         const response = await fetch(`/api/current-video?channel=${channelId}`, {
           headers: { 'Cache-Control': 'no-cache' }
         })
-        if (!response.ok) return
-        result = await response.json()
+        if (response.ok) {
+          result = await parseJsonSafely(response)
+        }
       }
 
-      if (!result) return
+      if (!result || !result.serverTime || !result.currentProgram) {
+        result = buildEmbeddedScheduleFallback(channelId)
+      }
 
       // Update server time offset
       if (result.serverTime) {
@@ -1376,6 +1419,7 @@ export function SyncedVideoPlayer({
     currentLoadAttemptRef.current = loadAttemptId
     const isStaleLoadAttempt = () => !mountedRef.current || currentLoadAttemptRef.current !== loadAttemptId
     const shouldStartUnmuted = Boolean(options?.preferUnmutedStart)
+    const shouldStartUnmutedOnAndroid = shouldStartUnmuted && isAndroid
 
     clearPlaybackStartWatchdog()
     clearChannelLoadTimeout()
@@ -1428,19 +1472,19 @@ export function SyncedVideoPlayer({
     }
     iosUnmuteRetryRef.current = false
     playEventsSinceLoadRef.current = 0
-    setIsVolumeControlsLocked(true)
+    setIsVolumeControlsLocked(!shouldStartUnmutedOnAndroid)
     
     setIsLoading(true)
     setApiError(null)
-    setIsMuted(true)
-    setYouTubeMuted(true)
+    setIsMuted(!shouldStartUnmutedOnAndroid)
+    setYouTubeMuted(!shouldStartUnmutedOnAndroid)
     playbackStateRef.current = YT_STATE.UNSTARTED
     bufferingStartedAtRef.current = 0
     bufferingRecoveryStepRef.current = 0
     playbackProgressWatchTimeRef.current = 0
     playbackProgressWatchAtRef.current = Date.now()
     setShowAutoUnmuteNotification(false)
-    hasAutoUnmutedRef.current = shouldStartUnmuted
+    hasAutoUnmutedRef.current = shouldStartUnmutedOnAndroid
 
     if (autoUnmuteTimerRef.current) {
       clearTimeout(autoUnmuteTimerRef.current)
@@ -1476,12 +1520,15 @@ export function SyncedVideoPlayer({
           signal: controller.signal,
         })
         clearTimeout(timeoutId)
-        
-        if (!response.ok) {
-          throw new Error(`API error: ${response.status}`)
+
+        if (response.ok) {
+          result = await parseJsonSafely(response)
         }
-        
-        result = await response.json()
+      }
+
+      if (!result || !result.serverTime || !result.currentProgram) {
+        console.warn('⚠️ API response unavailable; using embedded schedule fallback')
+        result = buildEmbeddedScheduleFallback(channelId)
       }
       
       // Unified format: { serverTime, currentProgram, previousPrograms, upcomingPrograms }
@@ -1612,6 +1659,9 @@ export function SyncedVideoPlayer({
         if (isIOS && initialStartFlowRef.current) {
           setYouTubeMuted(false)
           setIsMuted(false)
+        } else if (shouldStartUnmutedOnAndroid) {
+          setYouTubeMuted(false)
+          setIsMuted(false)
         } else {
           setYouTubeMuted(true)
           setIsMuted(true)
@@ -1729,6 +1779,13 @@ export function SyncedVideoPlayer({
             setYouTubeMuted(false)
             setIsMuted(false)
             setIsVolumeControlsLocked(false)
+          } else if (isAndroid && playEventsSinceLoadRef.current === 1) {
+            // 🤖 Android: Auto-unmute on first PLAYING event (same as initial iOS flow)
+            console.log('🤖 Android first PLAYING - auto-unmuting')
+            unmuteAndResume(volume)
+            setYouTubeMuted(false)
+            setIsMuted(false)
+            setIsVolumeControlsLocked(false)
           } else if (shouldStartUnmuted) {
             if (playEventsSinceLoadRef.current === 1) {
               setYouTubeMuted(true)
@@ -1831,7 +1888,7 @@ export function SyncedVideoPlayer({
           videoId: program.videoId,
           startSeconds: Math.floor(startTime),
           volume: volume,
-          muted: true,
+          muted: !shouldStartUnmutedOnAndroid,
           onReady: () => {
             startPlayback()
           },
@@ -1851,7 +1908,7 @@ export function SyncedVideoPlayer({
       setApiError(error instanceof Error ? error.message : 'Failed to load video')
       setIsLoading(false)
     }
-  }, [volume, isIOS, initializePlayer, loadVideo, seekTo, play, setYouTubeVolume, setYouTubeMuted, onChannelChange, onStartClick, getDuration, getCurrentTime, getIsMuted, fetchFromBrowserAPI, notifyParentScheduleChange, isPrimedRef, setPlayerCallbacks, unmuteAndResume, destroy, clearPlaybackStartWatchdog, clearBrandedOverlayHideTimeout, hideBrandedOverlayAfterDelay, clearChannelLoadTimeout, primePlayer])
+  }, [volume, isIOS, isAndroid, initializePlayer, loadVideo, seekTo, play, setYouTubeVolume, setYouTubeMuted, onChannelChange, onStartClick, getDuration, getCurrentTime, getIsMuted, fetchFromBrowserAPI, notifyParentScheduleChange, isPrimedRef, setPlayerCallbacks, unmuteAndResume, destroy, clearPlaybackStartWatchdog, clearBrandedOverlayHideTimeout, hideBrandedOverlayAfterDelay, clearChannelLoadTimeout, primePlayer])
 
   const handleFirstTimeStart = useCallback(() => {
     if (startInProgressRef.current) return
@@ -2032,11 +2089,14 @@ export function SyncedVideoPlayer({
         const response = await fetch(`/api/current-video?channel=${currentChannelId}`, {
           headers: { 'Cache-Control': 'no-cache' }
         })
-        if (!response.ok) return
-        result = await response.json()
+        if (response.ok) {
+          result = await parseJsonSafely(response)
+        }
       }
       
-      if (!result) return
+      if (!result || !result.serverTime || !result.currentProgram) {
+        result = buildEmbeddedScheduleFallback(currentChannelId)
+      }
       
       // Update server time offset
       if (result.serverTime) {
@@ -2180,6 +2240,7 @@ export function SyncedVideoPlayer({
   const handleReload = useCallback(() => {
     if (!currentChannelId) return
     console.log('🔄 Reloading channel:', currentChannelId)
+    onReloadStart?.()
     clearPlaybackStartWatchdog()
     clearBrandedOverlayHideTimeout()
     playbackRecoveryAttemptRef.current = 0
@@ -2204,12 +2265,17 @@ export function SyncedVideoPlayer({
     }
 
     // Keep UI in loading wrapper state during reload.
+    setShowControls(false)
+    setControlsVisible(false)
     setPlayerReady(false)
     setApiError(null)
     setIframeVisible(false) // hide iframe until next real PLAYING event
     setShowStartScreen(false)
     setIsLoading(true)
     setShowBrandedOverlay(false)
+    setShowProgramOverlay(false)
+    setShowChannelSelector(false)
+    setShowPreviousModal(false)
     setIsVolumeControlsLocked(true)
 
     // Preserve iOS player instance to keep gesture-unlocked audio context.
@@ -2625,7 +2691,7 @@ export function SyncedVideoPlayer({
   const isLastInCycle = currentProgram && cycleInfo.total ? cycleInfo.current === cycleInfo.total : false
 
   return (
-    <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-screen w-full overflow-hidden">
+    <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-screen w-full overflow-hidden" suppressHydrationWarning>
       <div className={`relative w-full ${
         isDesktop ? 'md:w-[70vw] md:max-w-[1400px]' :
         isTablet ? 'w-[90vw]' :

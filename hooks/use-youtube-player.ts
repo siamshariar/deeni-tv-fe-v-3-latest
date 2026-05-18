@@ -241,7 +241,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
         videoId: options.videoId,
         playerVars: {
           autoplay: 1,
-          mute: 1, // always start muted — required for iOS autoplay; onReady unmutes if needed
+          mute: options.muted ? 1 : 0,
           controls: 0,
           disablekb: 1,
           fs: 0,

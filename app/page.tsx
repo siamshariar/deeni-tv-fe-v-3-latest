@@ -11,8 +11,10 @@ import { ChannelSelector } from '@/components/channel-selector'
 import { VideoProgram } from '@/types/schedule'
 import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels, getFallbackApiChannels } from '@/lib/schedule-utils'
 import { clientFetchWithAuth } from '@/lib/client-fetch'
+import { initializeStatusBar } from '@/lib/status-bar-utils'
 
 export default function Home() {
+  const [isMounted, setIsMounted] = useState(false)
   const isIOS = useMemo(() => {
     if (typeof navigator === 'undefined') return false
     return (
@@ -37,6 +39,10 @@ export default function Home() {
   const [openChannelSelectorModal, setOpenChannelSelectorModal] = useState(false)
   const [reloadCounter, setReloadCounter] = useState(0)
 
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   // Check localStorage for saved channel on initial load
   useEffect(() => {
     // Load stored API channels (if any) for the ChannelSelector
@@ -58,6 +64,10 @@ export default function Home() {
     setIsLoading(false)
     // Run only once on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    void initializeStatusBar()
   }, [])
 
   // Fetch channel list for the ChannelSelector when it opens (first-time users)
@@ -139,6 +149,18 @@ export default function Home() {
     setActiveModal(null)
   }
 
+  const handleReloadStart = useCallback(() => {
+    setIsMenuOpen(false)
+    setIsChannelSelectorOpen(false)
+    setOpenHistoryModal(false)
+    setOpenChannelSelectorModal(false)
+    setActiveModal(null)
+  }, [])
+
+  if (!isMounted) {
+    return <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning />
+  }
+
   const handleCloseChannelSelector = () => {
     // If first time user closes without selecting, don't allow
     if (isFirstTimeUser && !activeChannelId) {
@@ -148,7 +170,7 @@ export default function Home() {
   }
 
   return (
-    <main className="relative min-h-screen bg-zinc-950">
+    <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning>
       {/* Logo Header - Commented out per requirements */}
       {/* <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-50 flex items-center">
         <img 
@@ -174,6 +196,7 @@ export default function Home() {
         openChannelSelectorModal={openChannelSelectorModal}
         onChannelSelectorModalClose={() => setOpenChannelSelectorModal(false)}
         onProgramChange={handleProgramChange}
+        onReloadStart={handleReloadStart}
         triggerReload={reloadCounter}
         hasUserSelectedChannel={!!activeChannelId}
       />

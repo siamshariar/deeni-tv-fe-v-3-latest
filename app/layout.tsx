@@ -132,13 +132,13 @@ export default function RootLayout({
       style={{ backgroundColor: '#09090b' }}
       suppressHydrationWarning
     >
-      <head />
+      <head suppressHydrationWarning />
       <body 
         className="font-sans antialiased bg-[#09090b] text-white"
         style={{ backgroundColor: '#09090b' }}
         suppressHydrationWarning={true}
       >
-        <div id="root">
+        <div id="root" suppressHydrationWarning>
           {children}
         </div>
         <Analytics />

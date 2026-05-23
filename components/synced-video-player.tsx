@@ -2525,18 +2525,15 @@ export function SyncedVideoPlayer({
     setYouTubeMuted,
   ])
 
-  // 5-minute sync interval
+  // 1-minute sync interval
   useEffect(() => {
-    if (!playerReady) return
-    
+    if (!playerReady) return    
     if (syncIntervalRef.current) {
       clearInterval(syncIntervalRef.current)
-    }
-    
+    }    
     syncIntervalRef.current = setInterval(() => {
       syncWithServer()
-    }, 300000) // 5 minutes
-    
+    }, 60000) // 1 minute     
     return () => {
       if (syncIntervalRef.current) {
         clearInterval(syncIntervalRef.current)
@@ -2708,7 +2705,7 @@ export function SyncedVideoPlayer({
               transitions are covered by BrandedLoadingOverlay instead. */}
           <div
             ref={youtubeContainerRef}
-            className="absolute inset-x-0 top-0 bottom-1 w-full"
+            className="absolute inset-0 w-full h-full"
             style={{ opacity: iframeVisible ? 1 : 0 }}
           />
           <div className="absolute inset-0 w-full h-full pointer-events-auto" />
@@ -2747,7 +2744,7 @@ export function SyncedVideoPlayer({
               exit={{ opacity: 0 }}
               className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-xl z-40 p-4"
             >
-              <div className="text-center w-full max-w-xs mx-auto">
+              <div className="text-center w-full max-w-xs mx-auto px-4 sm:px-6">
                 <div className={`relative flex items-center justify-center mb-6 ${
                   isMobile ? 'w-20 h-20' : 'w-24 h-24'
                 } mx-auto`}>

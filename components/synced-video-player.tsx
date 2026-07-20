@@ -1787,11 +1787,10 @@ export function SyncedVideoPlayer({
             setIsMuted(false)
             setIsVolumeControlsLocked(false)
           } else if (shouldStartUnmuted) {
-            if (playEventsSinceLoadRef.current === 1) {
-              setYouTubeMuted(true)
-              setIsMuted(true)
-              setIsVolumeControlsLocked(true)
-            } else if (!iosUnmuteRetryRef.current || getIsMuted()) {
+            // Unmute on the first PLAYING event — don't wait for a second one,
+            // since a correctly-resumed video (mid-position seekTo) may only
+            // ever emit a single PLAYING event per load.
+            if (!iosUnmuteRetryRef.current || getIsMuted()) {
               iosUnmuteRetryRef.current = true
               unmuteAndResume(volume)
               setYouTubeMuted(false)
@@ -1876,12 +1875,31 @@ export function SyncedVideoPlayer({
 
         // Ensure transition mute is applied; real video will unmute only on PLAYING.
         try { muteForTransition(shouldStartUnmuted) } catch (_) {}
+        const durationBeforeLoad = getDuration()
         const loaded = loadVideo(program.videoId, Math.floor(startTime))
         if (!loaded) {
           throw new Error('Failed to load video in primed iOS player')
         }
 
-        startPlayback()
+        // loadVideoById is async — the primed iframe hasn't swapped to the new
+        // video yet, so seeking/playing immediately can target the still-loading
+        // previous video and get silently dropped (playback stuck, not resuming
+        // at the live position). Wait for the duration to change (a proxy for
+        // "new video actually loaded") before seeking, with a bounded fallback
+        // so we never hang forever.
+        let readyCheckAttempt = 0
+        const waitForPrimedVideoReady = () => {
+          if (isStaleLoadAttempt()) return
+          const currentDuration = getDuration()
+          const videoSwapped = currentDuration > 0 && currentDuration !== durationBeforeLoad
+          if (videoSwapped || readyCheckAttempt >= 20) {
+            startPlayback()
+            return
+          }
+          readyCheckAttempt += 1
+          setTimeout(waitForPrimedVideoReady, 100)
+        }
+        waitForPrimedVideoReady()
       } else {
         if (isStaleLoadAttempt()) return
         await initializePlayer({

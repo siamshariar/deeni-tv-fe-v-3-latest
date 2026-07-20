@@ -238,6 +238,11 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
       
       playerRef.current = new window.YT.Player(playerDiv.id, {
         host: YT_EMBED_HOST,
+        // Without explicit width/height, the YT API defaults the injected
+        // <iframe> to a fixed 640x390 box that doesn't fill the mount div,
+        // leaving gaps around the video on other aspect ratios/screen sizes.
+        width: '100%',
+        height: '100%',
         videoId: options.videoId,
         playerVars: {
           autoplay: 1,
@@ -375,6 +380,8 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
 
       playerRef.current = new window.YT.Player(playerDiv.id, {
         host: YT_EMBED_HOST,
+        width: '100%',
+        height: '100%',
         videoId: IOS_PRIMER_VIDEO_ID,
         playerVars: {
           autoplay: 1,

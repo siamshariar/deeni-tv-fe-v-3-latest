@@ -1,60 +1,46 @@
 # Deeni TV - Latest Release Updates (May 16, 2026)
 
+> **Correction (added during PR #21 review):** the two items below were originally
+> written as completed fixes but did not match the shipped code — `boot-splash.tsx`
+> was never actually wired into the app (it has since been removed entirely as dead
+> code), the `StartScreen` simplification described here was never applied, and the
+> "dynamic status bar" integration described in `synced-video-player.tsx` did not
+> exist. Corrected to describe actual current behavior below. See
+> `PR-REVIEW-fixes_to_launch-vs-stg.md` for the full review that caught this.
+
 ## Summary of Changes
 
-### ✅ 1. Splash Screen Fixes
+### 1. Splash Screen
 **Problem**: Two splash screens were showing on Android APK startup, causing confusion.
 
-**Solution**:
-- **boot-splash.tsx** - Completely redesigned:
-  - Removed gradient radial background effects
-  - Simplified to show only logo and "Deeni.tv" text with proper spacing
-  - Logo above, gap, then white text below - no animations
-  - Responsive sizing using clamp() for all screen sizes
-  
-- **StartScreen Component** - Simplified:
-  - Removed feature badges (Live TV, Halal Content, Premium)
-  - Removed "Your Spiritual TV Experience" subtitle
-  - Removed helper text "Click to start your spiritual journey"
-  - Kept only: Deeni.tv logo → gap → white "Deeni.tv" text → Start button
-  - Clean, minimal interface
-
-**Result**: Single, clean splash screen shows once on startup with just:
-```
-        [Logo]
-        
-    Deeni.tv     (white text)
-    
-   [Start Button]
-```
+**Actual current state**:
+- The native Capacitor `SplashScreen` (configured in `capacitor.config.ts`) is what
+  actually shows on Android startup — logo/background per that config.
+- A second, unused React `boot-splash.tsx` component existed in the codebase but was
+  never imported or rendered anywhere; it has been deleted rather than "redesigned".
+- The in-app `StartScreen` (shown before playback starts, in
+  `components/synced-video-player.tsx`) still includes the feature badges (Live TV /
+  Halal Content / Premium), the "Your Spiritual TV Experience" subtitle, and the
+  helper text — none of those were removed. If the "single clean splash screen" look
+  described in an earlier draft of these notes is still wanted, that's still an open
+  design task, not something already shipped.
 
 ---
 
-### ✅ 2. Dynamic Status Bar Color Management
+### 2. Status Bar Color
 **Problem**: Status bar color wasn't updating during video playback on Android/iOS.
 
-**Solution**:
-- **New File**: `lib/status-bar-utils.ts`
-  - `updateStatusBarColor(color)` - Updates status bar on all platforms:
-    - Web: updates meta theme-color tag
-    - iOS/Android: uses Capacitor StatusBar plugin with proper TypeScript enums
-  - `resetStatusBarColor()` - Resets to default (#09090b) when not playing
-  - `getVideoBackgroundColor()` - Gets current video background color
-  - Full error handling for cross-platform compatibility
-
-- **Integration** in `synced-video-player.tsx`:
-  - Added useEffect to update status bar when:
-    - Video starts playing (playerReady = true)
-    - Video changes (currentProgram updates)
-    - Start screen shows (reset to default)
-  - Updates happen automatically during playback
-  - No performance impact - uses refs to avoid dependency issues
-
-- **Capacitor Config Update** (`capacitor.config.ts`):
-  - Added `overlaysWebView: false` to StatusBar plugin
-  - Maintains light text style (`Style.Light`)
-  - Dark background (#09090b) matches app theme
-  - Works consistently across Android, iOS, and web
+**Actual current state**:
+- `lib/status-bar-utils.ts` exists and exports `updateStatusBarColor()`,
+  `resetStatusBarColor()`, `initializeStatusBar()`.
+- Only `initializeStatusBar()` is actually called, once, on app mount
+  (`app/page.tsx`) — it resets the status bar to the default background color at
+  startup.
+- There is **no** call to `updateStatusBarColor()`/`resetStatusBarColor()` from
+  `synced-video-player.tsx` or anywhere else — the described "updates automatically
+  during playback / on video change / on start screen" behavior does not exist yet.
+  This remains an open task if dynamic status-bar-color-during-playback is still
+  wanted.
 
 ---
 
@@ -95,28 +81,17 @@ cd android && ./gradlew clean assembleRelease
 
 ## Key Files Modified
 
-1. **components/boot-splash.tsx** ✏️
-   - Simplified layout with logo + text
-   - Removed effects and animations
-   - Responsive sizing for all devices
+_(Corrected — see note at top of this file)_
 
-2. **components/synced-video-player.tsx** ✏️
-   - Simplified StartScreen component
-   - Added status bar color update effect
-   - Imported status bar utilities
-
-3. **lib/status-bar-utils.ts** 📄 (NEW)
-   - Complete status bar management system
-   - Cross-platform color updates
-   - Proper TypeScript enums for Capacitor
-
-4. **capacitor.config.ts** ✏️
-   - Updated StatusBar plugin config
-   - Added overlaysWebView setting
-   - Consistent dark theme configuration
-
-5. **package.json** ✏️
-   - Added @capacitor/status-bar@8.0.2 dependency
+1. **components/boot-splash.tsx** — was added but never wired into the app;
+   since deleted as dead code.
+2. **components/synced-video-player.tsx** — `StartScreen` was **not**
+   simplified (still has the feature badges/subtitle/helper text); no status
+   bar update effect was actually added here.
+3. **lib/status-bar-utils.ts** (NEW) — exists, but only `initializeStatusBar()`
+   (a one-time reset on app mount) is actually called anywhere.
+4. **capacitor.config.ts** — StatusBar plugin config changes did ship.
+5. **package.json** — `@capacitor/status-bar@8.0.2` dependency did ship.
 
 ---
 
@@ -147,11 +122,12 @@ Before release, test on:
 
 ## Release Notes for Users
 
+_(The splash-screen and status-bar items originally listed here were not
+actually shipped — removed. Remaining items reflect what did ship.)_
+
 ### What's New
-✨ **Cleaner Splash Screen** - Single, streamlined startup screen with improved visual design
-🎨 **Status Bar Color Updates** - Dynamic status bar that matches your video experience
-⚡ **Better Performance** - Optimized splash screen rendering
-🌍 **Cross-Platform Consistency** - Seamless experience on Android, iOS, and web
+📶 **Android offline fallback** - App can show cached Bengali programming when the live schedule API is unavailable
+🌍 **Cross-Platform Consistency** - Same core experience on Android, iOS, and web
 
 ### Installation
 1. Download `app-release.apk`

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="60dp"
+    android:viewportWidth="240"
+    android:viewportHeight="60">
+
+    <!-- "Deeni.tv" text using path elements -->
+    <!-- White background for better readability -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 0,0 L 240,0 L 240,60 L 0,60 Z" />
+
+    <!-- Text "Deeni.tv" - created using text paths -->
+    <!-- D -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 8,52 L 8,8 L 24,8 Q 30,8 30,14 L 30,46 Q 30,52 24,52 Z M 16,44 L 24,44 Q 26,44 26,42 L 26,16 Q 26,14 24,14 L 16,14 Z" />
+
+    <!-- e -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 40,52 Q 32,52 32,42 Q 32,32 40,32 Q 48,32 48,38 L 48,40 L 36,40 Q 36,46 40,46 Q 44,46 44,44 L 44,42 L 48,42 Q 48,52 40,52 Z M 40,36 Q 38,36 36,38 L 44,38 Q 44,36 40,36 Z" />
+
+    <!-- e -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 56,52 Q 48,52 48,42 Q 48,32 56,32 Q 64,32 64,38 L 64,40 L 52,40 Q 52,46 56,46 Q 60,46 60,44 L 60,42 L 64,42 Q 64,52 56,52 Z M 56,36 Q 54,36 52,38 L 60,38 Q 60,36 56,36 Z" />
+
+    <!-- n -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 72,52 Q 66,52 66,46 L 66,32 L 70,32 L 70,46 Q 70,50 72,50 Q 76,50 76,46 L 76,32 L 80,32 L 80,52 L 76,52 L 76,48 Q 74,52 72,52 Z" />
+
+    <!-- i -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 86,30 Q 84,30 84,28 Q 84,26 86,26 Q 88,26 88,28 Q 88,30 86,30 Z M 84,52 L 84,32 L 88,32 L 88,52 Z" />
+
+    <!-- Dot separator -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 96,48 Q 95,48 95,46 Q 95,44 96,44 Q 97,44 97,46 Q 97,48 96,48 Z" />
+
+    <!-- t -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 108,32 L 108,30 Q 108,26 104,26 L 108,26 L 108,20 L 112,20 L 112,26 L 116,26 L 116,30 L 112,30 L 112,44 Q 112,48 116,48 L 116,52 Q 108,52 108,44 L 108,30 Z" />
+
+    <!-- v -->
+    <path
+        android:fillColor="#09090b"
+        android:pathData="M 128,32 L 120,52 L 116,52 L 124,32 L 128,32 Z M 132,32 L 140,52 L 144,52 L 136,32 L 132,32 Z" />
+
+</vector>

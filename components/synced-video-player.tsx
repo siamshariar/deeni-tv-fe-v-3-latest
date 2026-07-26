@@ -777,7 +777,8 @@ export function SyncedVideoPlayer({
   onChannelSelectorModalClose,
   onReloadStart,
   onProgramChange,
-  triggerReload = 0
+  triggerReload = 0,
+  hasUserSelectedChannel = true
 }: SyncedVideoPlayerProps) {
   const [isIOS, setIsIOS] = useState(false)
   const [isAndroid, setIsAndroid] = useState(false)
@@ -2313,16 +2314,21 @@ export function SyncedVideoPlayer({
     loadChannel(currentChannelId, { preferUnmutedStart })
   }, [currentChannelId, currentProgram, isIOS, loadChannel, setYouTubeMuted, setIsMuted, unmuteAndResume, volume, destroy, clearPlaybackStartWatchdog, clearBrandedOverlayHideTimeout])
 
-  // Auto-start on web/android. iOS waits for explicit Start button click.
+  // Auto-start on web/android once a channel has been explicitly selected
+  // (first-time users must pick a language/channel first). iOS waits for
+  // explicit Start button click. Uses initialChannelId (not currentChannelId,
+  // which defaults to CHANNELS[0].id before any selection is made) so the
+  // channel actually chosen by the user is the one that gets loaded.
   useEffect(() => {
     if (!isPlatformReady) return
     if (isIOS) return
-    if (!currentChannelId) return
+    if (!hasUserSelectedChannel) return
+    if (!initialChannelId) return
     if (showStartScreen) return
     if (playerReady || isLoading || currentProgram || apiError) return
 
-    loadChannel(currentChannelId, { preferUnmutedStart: true })
-  }, [isPlatformReady, isIOS, currentChannelId, showStartScreen, playerReady, isLoading, currentProgram, apiError, loadChannel])
+    loadChannel(initialChannelId, { preferUnmutedStart: true })
+  }, [isPlatformReady, isIOS, hasUserSelectedChannel, initialChannelId, showStartScreen, playerReady, isLoading, currentProgram, apiError, loadChannel])
 
   // Trigger reload when parent increments the counter (e.g. Reload menu option)
   useEffect(() => {

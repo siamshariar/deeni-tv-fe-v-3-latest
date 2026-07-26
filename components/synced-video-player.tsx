@@ -1825,10 +1825,17 @@ export function SyncedVideoPlayer({
               setIsVolumeControlsLocked(false)
               setShowAutoUnmuteNotification(false)
             } else if (shouldStartUnmuted) {
-              // Still muted despite the unmute attempts above (all of which
-              // expect an unmuted start) — surface a visible prompt instead
-              // of leaving playback silently muted with no recovery path.
-              setShowAutoUnmuteNotification(true)
+              // Still muted right after the unmute attempts above — but the
+              // native unmute (e.g. the iOS Start-button gesture unlock) can
+              // lag a beat behind the API call that requested it, so give it
+              // a moment to actually take effect before concluding it's
+              // stuck and surfacing the recovery prompt.
+              setTimeout(() => {
+                if (!mountedRef.current || isStaleLoadAttempt()) return
+                if (getIsMuted()) {
+                  setShowAutoUnmuteNotification(true)
+                }
+              }, 500)
             }
           } catch (_) {}
 

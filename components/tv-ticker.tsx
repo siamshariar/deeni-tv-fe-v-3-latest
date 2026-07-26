@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core'
 import { motion } from 'framer-motion'
 import { Clock, ArrowRight } from 'lucide-react'
 import { CurrentVideoData, VideoProgram } from '@/types/schedule'
-import { formatTime, formatDuration, buildLocalCurrentVideoResponse } from '@/lib/schedule-utils'
+import { formatTime, formatDuration, buildLocalCurrentVideoResponse, getSavedChannel } from '@/lib/schedule-utils'
 
 async function parseJsonSafely(response: Response) {
   const contentType = response.headers.get('content-type') || ''
@@ -34,7 +34,12 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
   const isAndroid = typeof window !== 'undefined' && Capacitor.getPlatform() === 'android'
 
   const applyLocalFallback = () => {
-    const data = buildLocalCurrentVideoResponse('bangla-1')
+    // Use the user's actual selected channel, not a hardcoded default —
+    // buildLocalCurrentVideoResponse() itself falls back to Bangla content
+    // internally (and flags channelUnavailable) if this channel has no
+    // embedded data of its own.
+    const channelId = getSavedChannel() || 'bangla-1'
+    const data = buildLocalCurrentVideoResponse(channelId)
     setCurrentData({
       program: {
         id: data.currentProgram.ytVideoId,
@@ -44,7 +49,7 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
         duration: data.currentProgram.duration,
         category: 'Lecture',
         language: 'Bengali',
-        channelId: 'bangla-1',
+        channelId,
       } as VideoProgram,
       currentTime: data.currentProgram.seekTo,
       timeRemaining: data.currentProgram.duration - data.currentProgram.seekTo,
@@ -56,14 +61,14 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
         duration: data.upcomingPrograms[0]?.duration || data.currentProgram.duration,
         category: 'Lecture',
         language: 'Bengali',
-        channelId: 'bangla-1',
+        channelId,
       } as VideoProgram,
       serverTime: data.serverTime,
       programIndex: 0,
       epochStart: 0,
       nextProgramStartTime: data.currentProgram.endTime,
       totalPrograms: Math.max(1, data.upcomingPrograms.length + 1),
-      channelId: 'bangla-1',
+      channelId,
     } as any)
     setTimeRemaining(data.currentProgram.duration - data.currentProgram.seekTo)
     setUpcomingVideos((data.upcomingPrograms || []).map((program: any) => ({
@@ -74,7 +79,7 @@ export function TVTicker({ isVisible = true, className = '', currentData: propCu
       duration: program.duration,
       category: 'Lecture',
       language: 'Bengali',
-      channelId: 'bangla-1',
+      channelId,
     })))
   }
 

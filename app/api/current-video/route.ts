@@ -150,6 +150,10 @@ export async function GET(request: Request) {
       previousPrograms,
       upcomingPrograms,
       _source: 'local-schedule',
+      // True when this channel has no embedded fallback data of its own and
+      // the content above is substituted Bangla programming instead — lets
+      // the client surface that instead of silently misrepresenting it.
+      channelUnavailable: data.channelUnavailable,
     }, { headers: responseHeaders })
 
   } catch (error) {

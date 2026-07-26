@@ -398,17 +398,24 @@ const StartScreen = ({
 }
 
 // Auto-Unmute Notification Component
-const AutoUnmuteNotification = ({ isVisible }: { isVisible: boolean }) => {
+// Visible fallback for when the player ends up muted mid-playback and the
+// automatic unmute recovery didn't take effect — gives the user something
+// to tap instead of silently watching a muted stream.
+const AutoUnmuteNotification = ({ isVisible, onUnmute }: { isVisible: boolean; onUnmute: () => void }) => {
   return (
     <AnimatePresence>
       {isVisible && (
-        <motion.div
+        <motion.button
+          type="button"
+          onClick={onUnmute}
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: 20 }}
-          className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-50"
+          className="absolute bottom-20 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-2 rounded-full bg-black/80 backdrop-blur-sm border border-white/20 px-4 py-2 text-sm font-medium text-white shadow-lg hover:bg-black/90 transition-colors"
         >
-        </motion.div>
+          <VolumeX className="h-4 w-4" />
+          Tap to unmute
+        </motion.button>
       )}
     </AnimatePresence>
   )
@@ -1538,7 +1545,7 @@ export function SyncedVideoPlayer({
       }
 
       if (isStaleLoadAttempt()) return
-      
+
       const offset = result.serverTime - clientTime
       setServerTimeOffset(offset)
       
@@ -1816,6 +1823,12 @@ export function SyncedVideoPlayer({
               setYouTubeMuted(false)
               setIsMuted(false)
               setIsVolumeControlsLocked(false)
+              setShowAutoUnmuteNotification(false)
+            } else if (shouldStartUnmuted) {
+              // Still muted despite the unmute attempts above (all of which
+              // expect an unmuted start) — surface a visible prompt instead
+              // of leaving playback silently muted with no recovery path.
+              setShowAutoUnmuteNotification(true)
             }
           } catch (_) {}
 
@@ -2637,6 +2650,7 @@ export function SyncedVideoPlayer({
       setYouTubeMuted(newMuted)
       if (!newMuted) {
         setYouTubeVolume(volume)
+        setShowAutoUnmuteNotification(false)
       }
       return newMuted
     })
@@ -2758,7 +2772,16 @@ export function SyncedVideoPlayer({
           )}
 
           {/* Auto-Unmute Notification */}
-          <AutoUnmuteNotification isVisible={showAutoUnmuteNotification && !showStartScreen && playerReady && !apiError} />
+          <AutoUnmuteNotification
+            isVisible={showAutoUnmuteNotification && !showStartScreen && playerReady && !apiError}
+            onUnmute={() => {
+              unmuteAndResume(volume)
+              setYouTubeMuted(false)
+              setIsMuted(false)
+              setIsVolumeControlsLocked(false)
+              setShowAutoUnmuteNotification(false)
+            }}
+          />
           
           {/* Loading overlay */}
           {isLoading && (

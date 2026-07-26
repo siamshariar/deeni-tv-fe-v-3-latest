@@ -88,30 +88,28 @@ const [apiChannels, setApiChannels] = useState<ApiChannel[]>(() =>
 ```
 ✅ Android shows channel list immediately from embedded data
 
-### 2️⃣ Video Player Load (`components/synced-video-player.tsx:1465`)
+### 2️⃣ Video Player Load & Transition Refresh (`components/synced-video-player.tsx`, `buildEmbeddedScheduleFallback`)
 ```typescript
-if (!result && isAndroid) {
-  console.log('📋 Falling back to embedded local schedule...')
-  result = buildLocalCurrentVideoResponse(channelId)
+if (!result || !result.serverTime || !result.currentProgram) {
+  result = buildEmbeddedScheduleFallback(channelId)
 }
 ```
-✅ When API fails, player gets embedded video + schedule
+> **Corrected**: this is **not** gated behind `isAndroid` — it's a universal
+> fallback that runs on any platform whenever the API response is missing or
+> invalid, not an Android-specific branch. (Arguably better than Android-only,
+> since web/iOS also get a graceful fallback — just not what was originally
+> documented here.)
+✅ When the API fails, the player gets embedded video + schedule, on any platform
 
-### 3️⃣ Ticker Refresh (`components/tv-ticker.tsx:85`)
+### 3️⃣ Ticker Refresh (`components/tv-ticker.tsx`)
 ```typescript
 if (isAndroid) {
-  applyLocalFallback()  // Uses buildLocalCurrentVideoResponse
+  applyLocalFallback()  // Uses buildLocalCurrentVideoResponse for the user's actual saved channel
 }
 ```
-✅ Scrolling ticker updates with embedded data
-
-### 4️⃣ Transition Refresh (`components/synced-video-player.tsx:1304`)
-```typescript
-if (!result && isAndroid) {
-  result = buildLocalCurrentVideoResponse(channelId)
-}
-```
-✅ When video transitions, next video loads from embedded data
+✅ Scrolling ticker updates with embedded data on Android. As of this
+correction, it now uses the user's actual saved channel (`getSavedChannel()`)
+rather than a hardcoded `'bangla-1'`.
 
 ---
 
@@ -165,8 +163,9 @@ Now Playing: জুমুআর খুতবাহ্‌...
 ### Step 1: Build APK
 ```bash
 cd deeni-tv-fe
-pnpm build
-next export
+pnpm run build:android-web   # was `pnpm build && next export` — next export
+                              # doesn't exist on Next.js 16, see ANDROID-OFFLINE-GUIDE.md
+npx cap sync android
 cd android
 ./gradlew assembleRelease
 ```
@@ -246,8 +245,18 @@ Battery Impact:
 
 Schedule Coverage:
   - Bengali:        16 videos (15+ hours)
-  - Other channels: Empty (only Bengali has offline content)
+  - Other channels: Empty (only Bengali has offline content as of this writing)
 ```
+
+> **Note (corrected during PR #21 review)**: when a channel has no offline
+> data, the player now shows a visible "This channel's schedule is
+> temporarily unavailable — showing Bangla programming instead" notice
+> instead of silently substituting Bangla content — see `channelUnavailable`
+> in `lib/schedule-utils.ts`. `fetchLocalScheduleData()` was also fixed to
+> actually use per-channel data from `public/api/fallback-schedule.json`
+> when present, so populating that file with other channels' programs (per
+> the "Update Embedded Schedule" section in `ANDROID-OFFLINE-GUIDE.md`) will
+> now genuinely extend offline coverage without needing a code change.
 
 ---
 

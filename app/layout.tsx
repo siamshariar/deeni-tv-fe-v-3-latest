@@ -53,19 +53,19 @@ export const metadata: Metadata = {
   
   icons: {
     icon: [
-      { url: '/favicon-16x16.png', sizes: '16x16', type: 'image/png' },
-      { url: '/favicon-32x32.png', sizes: '32x32', type: 'image/png' },
-      { url: '/favicon-48x48.png', sizes: '48x48', type: 'image/png' },
-      { url: '/favicon-192x192.png', sizes: '192x192', type: 'image/png' },
-      { url: '/favicon-256x256.png', sizes: '256x256', type: 'image/png' },
-      { url: '/favicon-384x384.png', sizes: '384x384', type: 'image/png' },
-      { url: '/favicon-512x512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/App_logo_192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/App_logo_256.png', sizes: '256x256', type: 'image/png' },
+      { url: '/App_logo_384.png', sizes: '384x384', type: 'image/png' },
+      { url: '/App_logo_512.png', sizes: '512x512', type: 'image/png' },
+      { url: '/1024-1024-size.png', sizes: '1024x1024', type: 'image/png' },
+      { url: '/2732-2732-size.png', sizes: '2732x2732', type: 'image/png' },
     ],
     apple: [
-      { url: '/favicon-180x180.png', sizes: '180x180', type: 'image/png' },
-      { url: '/favicon-192x192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/App_logo_192.png', sizes: '192x192', type: 'image/png' },
+      { url: '/1024-1024-size.png', sizes: '1024x1024', type: 'image/png' },
+      { url: '/2732-2732-size.png', sizes: '2732x2732', type: 'image/png' },
     ],
-    shortcut: '/favicon-32x32.png',
+    shortcut: '/App_logo_192.png',
   },
 
   manifest: '/manifest.json',

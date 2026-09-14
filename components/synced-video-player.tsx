@@ -1289,7 +1289,7 @@ export function SyncedVideoPlayer({
       const data: any = await Promise.race([
         clientFetchWithAuth(apiUrl),
         new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('External API timeout')), 10000)
+          setTimeout(() => reject(new Error('External API timeout')), 120000)
         }),
       ])
 

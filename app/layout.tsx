@@ -2,7 +2,9 @@ import React from 'react'
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import Script from 'next/script'
 import GoogleAnalytics from '../components/google-analytics'
+import { GA_TRACKING_ID } from '../lib/gtag'
 import './globals.css'
 
 const geist = Geist({ 
@@ -134,8 +136,25 @@ export default function RootLayout({
       style={{ backgroundColor: '#09090b' }}
       suppressHydrationWarning
     >
-      <head suppressHydrationWarning />
-      <body 
+      <head suppressHydrationWarning>
+        {GA_TRACKING_ID && (
+          <>
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_TRACKING_ID}`}
+              strategy="afterInteractive"
+            />
+            <Script id="gtag-init" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${GA_TRACKING_ID}');
+              `}
+            </Script>
+          </>
+        )}
+      </head>
+      <body
         className="font-sans antialiased bg-[#09090b] text-white"
         style={{ backgroundColor: '#09090b' }}
         suppressHydrationWarning={true}

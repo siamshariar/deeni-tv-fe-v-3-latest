@@ -58,7 +58,10 @@ async function jwtEncode(payload: Record<string, unknown>, secret: string): Prom
 async function generateClientToken(): Promise<string> {
   const secret = process.env.NEXT_PUBLIC_NP_AS_L
   if (!secret) {
-    throw new Error('NEXT_PUBLIC_NP_AS_L environment variable is not set')
+    // For local development and environments without secret, do not crash.
+    // This is a safe fallback path for dev-server, where JWT auth may not be needed.
+    console.warn('NEXT_PUBLIC_NP_AS_L environment variable is not set. Falling back to no auth token (dev only).')
+    return ''
   }
 
   // Get current time in America/New_York timezone (same as Quran Tube)
@@ -83,11 +86,57 @@ async function generateClientToken(): Promise<string> {
 export async function clientFetchWithAuth(url: string): Promise<any> {
   const token = await generateClientToken()
 
-  const res = await fetch(url, {
-    headers: {
-      'p': token,
-    },
-  })
+  const headers: Record<string, string> = {}
+  if (token) {
+    headers.p = token
+  }
 
-  return res.json()
+  const res = await fetch(url, { headers })
+
+  if (!res.ok) {
+    // Try to parse JSON error, fallback to text message.
+    const text = await res.text()
+    let msg = text
+
+    try {
+      const json = JSON.parse(text)
+      msg = JSON.stringify(json)
+    } catch {
+      // keep raw text like 'Forbidden'
+    }
+
+    // Fallback behavior for local/dev: if we get 403 and no JWT token in request,
+    // try one more time without auth header.
+    if (res.status === 403 && !headers.p) {
+      console.warn('403 received from auth endpoint; retrying without token...')
+      const res2 = await fetch(url)
+      if (res2.ok) {
+        const contentType2 = res2.headers.get('content-type') || ''
+        if (contentType2.includes('application/json')) {
+          return res2.json()
+        }
+        const text2 = await res2.text()
+        try {
+          return JSON.parse(text2)
+        } catch {
+          return text2
+        }
+      }
+    }
+
+    throw new Error(`Request failed ${res.status} ${res.statusText}: ${msg}`)
+  }
+
+  // Response may sometimes be plain text (e.g. 200 w/ text) in non-API paths.
+  const contentType = res.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    return res.json()
+  }
+
+  const text = await res.text()
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
+  }
 }

@@ -1,54 +1,97 @@
+/* tailwindcss */
 @import 'tailwindcss';
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));
 
 :root {
+  --background: #09090b;
   --background: oklch(0.08 0 0);
+  --foreground: #fafafa;
   --foreground: oklch(0.98 0 0);
+  --card: #17171b;
   --card: oklch(0.12 0 0);
+  --card-foreground: #fafafa;
   --card-foreground: oklch(0.98 0 0);
+  --popover: #111114;
   --popover: oklch(0.1 0 0);
+  --popover-foreground: #fafafa;
   --popover-foreground: oklch(0.98 0 0);
+  --primary: #f4bf24;
   --primary: oklch(0.75 0.15 85);
+  --primary-foreground: #121212;
   --primary-foreground: oklch(0.08 0 0);
+  --secondary: #3f3f46;
   --secondary: oklch(0.3 0 0);
+  --secondary-foreground: #fafafa;
   --secondary-foreground: oklch(0.98 0 0);
+  --muted: #3f3f46;
   --muted: oklch(0.25 0 0);
+  --muted-foreground: #a1a1aa;
   --muted-foreground: oklch(0.65 0 0);
+  --accent: #f4bf24;
   --accent: oklch(0.75 0.15 85);
+  --accent-foreground: #121212;
   --accent-foreground: oklch(0.08 0 0);
+  --destructive: #ef4444;
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: #fafafa;
   --destructive-foreground: oklch(0.98 0 0);
+  --border: #3f3f46;
   --border: oklch(0.25 0 0);
+  --input: #3f3f46;
   --input: oklch(0.25 0 0);
+  --ring: #f4bf24;
   --ring: oklch(0.75 0.15 85);
   --radius: 0.75rem;
+  --glass-bg: rgba(9, 9, 11, 0.4);
   --glass-bg: oklch(0.08 0 0 / 0.4);
+  --glass-border: rgba(113, 113, 122, 0.1);
   --glass-border: oklch(0.5 0 0 / 0.1);
 }
 
 .dark {
+  --background: #09090b;
   --background: oklch(0.08 0 0);
+  --foreground: #fafafa;
   --foreground: oklch(0.98 0 0);
+  --card: #17171b;
   --card: oklch(0.12 0 0);
+  --card-foreground: #fafafa;
   --card-foreground: oklch(0.98 0 0);
+  --popover: #111114;
   --popover: oklch(0.1 0 0);
+  --popover-foreground: #fafafa;
   --popover-foreground: oklch(0.98 0 0);
+  --primary: #f4bf24;
   --primary: oklch(0.75 0.15 85);
+  --primary-foreground: #121212;
   --primary-foreground: oklch(0.08 0 0);
+  --secondary: #3f3f46;
   --secondary: oklch(0.3 0 0);
+  --secondary-foreground: #fafafa;
   --secondary-foreground: oklch(0.98 0 0);
+  --muted: #3f3f46;
   --muted: oklch(0.25 0 0);
+  --muted-foreground: #a1a1aa;
   --muted-foreground: oklch(0.65 0 0);
+  --accent: #f4bf24;
   --accent: oklch(0.75 0.15 85);
+  --accent-foreground: #121212;
   --accent-foreground: oklch(0.08 0 0);
+  --destructive: #ef4444;
   --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: #fafafa;
   --destructive-foreground: oklch(0.98 0 0);
+  --border: #3f3f46;
   --border: oklch(0.25 0 0);
+  --input: #3f3f46;
   --input: oklch(0.25 0 0);
+  --ring: #f4bf24;
   --ring: oklch(0.75 0.15 85);
+  --glass-bg: rgba(9, 9, 11, 0.4);
   --glass-bg: oklch(0.08 0 0 / 0.4);
+  --glass-border: rgba(113, 113, 122, 0.1);
   --glass-border: oklch(0.5 0 0 / 0.1);
 }
 
@@ -84,6 +127,12 @@
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body,
+  #root {
+    background: #09090b;
+    min-height: 100%;
+  }
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
@@ -110,8 +159,8 @@
   }
 
   @keyframes glow {
-    0%, 100% { box-shadow: 0 0 20px oklch(0.75 0.15 85 / 0.3); }
-    50% { box-shadow: 0 0 40px oklch(0.75 0.15 85 / 0.5); }
+    0%, 100% { box-shadow: 0 0 20px rgba(244, 191, 36, 0.3); }
+    50% { box-shadow: 0 0 40px rgba(244, 191, 36, 0.5); }
   }
   
   .animate-glow {
@@ -142,16 +191,16 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: oklch(0.12 0 0);
+  background: #17171b;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: oklch(0.3 0 0);
+  background: #3f3f46;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: oklch(0.4 0 0);
+  background: #52525b;
 }
 
 /* Safe area insets for modern mobile devices */

@@ -14,8 +14,12 @@ export function DonateButton() {
     if (fetchedRef.current) return
     fetchedRef.current = true
 
-    fetch('/api/donation-url')
-      .then(res => res.json())
+    fetch('/api/donation-url', { cache: 'no-store' })
+      .then(async (res) => {
+        const contentType = res.headers.get('content-type') || ''
+        if (!contentType.includes('application/json')) return null
+        return res.json()
+      })
       .then(data => { if (data?.url) setDonationUrl(data.url) })
       .catch(() => { /* keep DEFAULT_URL on any error */ })
   }, [])
@@ -26,6 +30,7 @@ export function DonateButton() {
 
   return (
     <div className="fixed right-2 sm:right-4 z-50 flex items-center"
+      suppressHydrationWarning
       style={{ top: 'max(0.5rem, env(safe-area-inset-top))' }}
     >
       {/* Donate Button - Shows on all screens including mobile */}

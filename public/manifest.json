@@ -33,10 +33,10 @@
       "type": "image/png"
     },
     {
-      "src": "/App_logo_256.png",
-      "sizes": "256x256",
+      "src": "/App_logo_512.png",
+      "sizes": "512x512",
       "type": "image/png",
-      "purpose":"maskable"
+      "purpose": "maskable"
     }
   ],
   "id": "/?source=pwa",
@@ -44,7 +44,7 @@
   "background_color": "#09090b",
   "display": "standalone",
   "scope": "/",
-  "theme_color": "#000000",
+  "theme_color": "#09090b",
   "description": "Deeni.tv",
   "lang": "en",
   "categories": [

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { Capacitor } from '@capacitor/core'
 import { SyncedVideoPlayer } from '@/components/synced-video-player'
 import { MenuDrawer, MenuOption } from '@/components/menu-drawer'
 import { DonateButton } from '@/components/donate-button'
@@ -8,12 +9,23 @@ import { ScheduleModal } from '@/components/schedule-modal'
 import { AboutModal } from '@/components/about-modal'
 import { ChannelSelector } from '@/components/channel-selector'
 import { VideoProgram } from '@/types/schedule'
-import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels } from '@/lib/schedule-utils'
+import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels, getFallbackApiChannels } from '@/lib/schedule-utils'
 import { clientFetchWithAuth } from '@/lib/client-fetch'
+import { initializeStatusBar } from '@/lib/status-bar-utils'
 
 export default function Home() {
-  const [activeChannelId, setActiveChannelId] = useState<string>('')
-  const [apiChannels, setApiChannels] = useState<ApiChannel[]>([])
+  const [isMounted, setIsMounted] = useState(false)
+  const isIOS = useMemo(() => {
+    if (typeof navigator === 'undefined') return false
+    return (
+      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+    )
+  }, [])
+  const isAndroid = useMemo(() => typeof window !== 'undefined' && Capacitor.getPlatform() === 'android', [])
+
+  const [activeChannelId, setActiveChannelId] = useState<string | undefined>(undefined)
+  const [apiChannels, setApiChannels] = useState<ApiChannel[]>(() => isAndroid ? getFallbackApiChannels() : [])
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [isChannelSelectorOpen, setIsChannelSelectorOpen] = useState(false)
   const [isFirstTimeUser, setIsFirstTimeUser] = useState(false)
@@ -27,6 +39,10 @@ export default function Home() {
   const [openChannelSelectorModal, setOpenChannelSelectorModal] = useState(false)
   const [reloadCounter, setReloadCounter] = useState(0)
 
+  useEffect(() => {
+    setIsMounted(true)
+  }, [])
+
   // Check localStorage for saved channel on initial load
   useEffect(() => {
     // Load stored API channels (if any) for the ChannelSelector
@@ -38,14 +54,20 @@ export default function Home() {
       setActiveChannelId(savedChannel)
       setHasUserInteracted(true)
       setIsFirstTimeUser(false)
-      // If channel exists, show start modal
-      setShowStartModal(true)
+      // iOS needs a user gesture for reliable audio; others auto-start.
+      setShowStartModal(isIOS)
     } else {
-      // First time user - show channel selector immediately (must select)
+      // First time user - open channel selector immediately (do not wait)
       setIsFirstTimeUser(true)
       setIsChannelSelectorOpen(true)
     }
     setIsLoading(false)
+    // Run only once on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    void initializeStatusBar()
   }, [])
 
   // Fetch channel list for the ChannelSelector when it opens (first-time users)
@@ -62,16 +84,19 @@ export default function Home() {
         }
       } catch { /* ignore */ }
       // Fallback: Next.js route (uses static data on STG)
-      try {
-        const res = await fetch('/api/tv-channels')
-        const json = await res.json()
-        if (json?.data?.length) {
-          saveApiChannels(json.data)
-          setApiChannels(json.data)
-        }
-      } catch { /* ignore */ }
+      if (!isAndroid) {
+        try {
+          const res = await fetch('/api/tv-channels')
+          const contentType = res.headers.get('content-type') || ''
+          const json = contentType.includes('application/json') ? await res.json() : null
+          if (json?.data?.length) {
+            saveApiChannels(json.data)
+            setApiChannels(json.data)
+          }
+        } catch { /* ignore */ }
+      }
     })()
-  }, [isChannelSelectorOpen, apiChannels.length])
+  }, [isChannelSelectorOpen, apiChannels.length, isAndroid])
 
   // Called by SyncedVideoPlayer whenever the current program / schedule changes
   // (video ended → next started, API sync, queue shift, etc.)
@@ -87,9 +112,9 @@ export default function Home() {
     setIsFirstTimeUser(false)
     setIsChannelSelectorOpen(false)
     
-    // After channel selection, show start modal
+    // iOS uses explicit Start; web/android auto-start.
     setTimeout(() => {
-      setShowStartModal(true)
+      setShowStartModal(isIOS)
     }, 300)
   }
 
@@ -124,6 +149,18 @@ export default function Home() {
     setActiveModal(null)
   }
 
+  const handleReloadStart = useCallback(() => {
+    setIsMenuOpen(false)
+    setIsChannelSelectorOpen(false)
+    setOpenHistoryModal(false)
+    setOpenChannelSelectorModal(false)
+    setActiveModal(null)
+  }, [])
+
+  if (!isMounted) {
+    return <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning />
+  }
+
   const handleCloseChannelSelector = () => {
     // If first time user closes without selecting, don't allow
     if (isFirstTimeUser && !activeChannelId) {
@@ -132,20 +169,8 @@ export default function Home() {
     setIsChannelSelectorOpen(false)
   }
 
-  // If still loading initial state, show minimal loading
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-zinc-950">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-white">Loading Deeni.tv...</p>
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <main className="relative min-h-screen bg-zinc-950">
+    <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning>
       {/* Logo Header - Commented out per requirements */}
       {/* <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-50 flex items-center">
         <img 
@@ -171,7 +196,9 @@ export default function Home() {
         openChannelSelectorModal={openChannelSelectorModal}
         onChannelSelectorModalClose={() => setOpenChannelSelectorModal(false)}
         onProgramChange={handleProgramChange}
+        onReloadStart={handleReloadStart}
         triggerReload={reloadCounter}
+        hasUserSelectedChannel={!!activeChannelId}
       />
       
       {/* Menu Drawer - Slides from bottom */}

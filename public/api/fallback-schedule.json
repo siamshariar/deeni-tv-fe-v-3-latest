@@ -1,0 +1,134 @@
+{
+  "channels": [
+    {
+      "id": "bangla-1",
+      "name": "বাংলা",
+      "language": "Bengali",
+      "icon": "📺",
+      "programs": [
+        {
+          "id": "b1",
+          "videoId": "wlTnG3PvBG8",
+          "title": "জুমুআর খুতবাহ্‌ - আল্লাহ কোথায় ? ।। Dr. Imam Hossain",
+          "description": "জুমুআর খুতবাহ্‌ - আল্লাহ কোথায় - Dr. Imam Hossain এর আলোচনা",
+          "duration": 3633,
+          "category": "Lecture",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/wlTnG3PvBG8/maxresdefault.jpg"
+        },
+        {
+          "id": "b2",
+          "videoId": "hABN2uy36v8",
+          "title": "হিজরতের বিবেক জাগানিয়া শিক্ষা: ঈমান প্রশ্নে আপস নয়",
+          "description": "হিজরতের বিবেক জাগানিয়া শিক্ষা সম্পর্কে আলোচনা",
+          "duration": 1800,
+          "category": "Lecture",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/hABN2uy36v8/maxresdefault.jpg"
+        },
+        {
+          "id": "b3",
+          "videoId": "NTtDNHKr-zk",
+          "title": "বর্তমান আলেম সমাজের অবস্থা আমাদের করণীয়- ড. খোন্দকার আব্দুল্লাহ জাহাঙ্গীর রাহিমাহুল্লাহ",
+          "description": "বর্তমান আলেম সমাজের অবস্থা সম্পর্কে ড. খোন্দকার আব্দুল্লাহ জাহাঙ্গীর এর আলোচনা",
+          "duration": 1043,
+          "category": "Lecture",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/NTtDNHKr-zk/maxresdefault.jpg"
+        },
+        {
+          "id": "b4",
+          "videoId": "mT5HfBlIbKM",
+          "title": "20.3 সূরা ত্ব-হা ২য় পর্ব (অংশ - ১/৩) ।। Dr. Imam Hossain",
+          "description": "সূরা ত্ব-হা ২য় পর্ব - Dr. Imam Hossain এর তাফসীর",
+          "duration": 1233,
+          "category": "Lecture",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/mT5HfBlIbKM/maxresdefault.jpg"
+        },
+        {
+          "id": "b5",
+          "videoId": "2C8rGnSyeVA",
+          "title": "জেনে নিন ড. খোন্দকার আব্দুল্লাহ জাহঙ্গীর রাহ. ইসলামিক টিভির প্রোগ্রাম দৈনন্দিন জীবনে ইসলাম",
+          "description": "দৈনন্দিন জীবনে ইসলাম - ড. খোন্দকার আব্দুল্লাহ জাহাঙ্গীর এর প্রোগ্রাম",
+          "duration": 1911,
+          "category": "Lecture",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/2C8rGnSyeVA/maxresdefault.jpg"
+        },
+        {
+          "id": "b6",
+          "videoId": "EBmlXo-lgcU",
+          "title": "আপনার জিজ্ঞাসা ২০২৪ | Apnar Jiggasa | EP 3206 | NTV Islamic Show",
+          "description": "আপনার জিজ্ঞাসা - এনটিভি ইসলামিক শো",
+          "duration": 1362,
+          "category": "Q&A",
+          "language": "Bengali",
+          "channelId": "bangla-1",
+          "thumbnail": "https://img.youtube.com/vi/EBmlXo-lgcU/maxresdefault.jpg"
+        }
+      ]
+    },
+    {
+      "id": "english-1",
+      "name": "English",
+      "language": "English",
+      "icon": "📺",
+      "programs": []
+    },
+    {
+      "id": "arabic-1",
+      "name": "العربية",
+      "language": "Arabic",
+      "icon": "📺",
+      "programs": []
+    },
+    {
+      "id": "urdu-1",
+      "name": "اردو",
+      "language": "Urdu",
+      "icon": "📺",
+      "programs": []
+    },
+    {
+      "id": "chinese-1",
+      "name": "中文",
+      "language": "Chinese",
+      "icon": "📺",
+      "programs": []
+    },
+    {
+      "id": "quran-bangla",
+      "name": "কুরআন বাংলা",
+      "language": "Bengali",
+      "icon": "📖",
+      "programs": []
+    },
+    {
+      "id": "quran-english",
+      "name": "Quran English",
+      "language": "English",
+      "icon": "📖",
+      "programs": []
+    },
+    {
+      "id": "quran-arabic",
+      "name": "القرآن العربي",
+      "language": "Arabic",
+      "icon": "📖",
+      "programs": []
+    },
+    {
+      "id": "quran-chinese",
+      "name": "古兰经中文",
+      "language": "Chinese",
+      "icon": "📖",
+      "programs": []
+    }
+  ]
+}

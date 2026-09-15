@@ -1,9 +1,10 @@
-
-import React from "react"
+import React from 'react'
 import type { Metadata, Viewport } from 'next'
 import { Geist, Geist_Mono } from 'next/font/google'
 import { Analytics } from '@vercel/analytics/next'
+import Script from 'next/script'
 import GoogleAnalytics from '../components/google-analytics'
+import { GA_TRACKING_ID } from '../lib/gtag'
 import './globals.css'
 
 const geist = Geist({ 
@@ -27,8 +28,8 @@ export const viewport: Viewport = {
   userScalable: false,
   viewportFit: 'cover',
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#000000' },
-    { media: '(prefers-color-scheme: dark)', color: '#000000' },
+    { media: '(prefers-color-scheme: light)', color: '#09090b' },
+    { media: '(prefers-color-scheme: dark)', color: '#09090b' },
   ],
 }
 
@@ -119,7 +120,7 @@ export const metadata: Metadata = {
   // PWA meta tags — explicitly rendered in <head> below for full iOS control.
   // Keeping only entries that don't have a dedicated <meta> in RootLayout.
   other: {
-    'msapplication-TileColor': '#000000',
+    'msapplication-TileColor': '#09090b',
   },
 }
 
@@ -132,92 +133,33 @@ export default function RootLayout({
     <html 
       lang="en" 
       className={`${geist.variable} ${geistMono.variable}`}
+      style={{ backgroundColor: '#09090b' }}
       suppressHydrationWarning
     >
-      <head>
-        {/* ── Viewport: lock zoom, cover notch/home-bar on iOS ── */}
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
-        />
-
-        {/* ── PWA manifest ── */}
-        <link rel="manifest" href="/manifest.json" />
-        <link rel="manifest" href="/manifest.webmanifest" />
-
-        {/* ── Safari / iOS home-screen PWA ── */}
-        {/* Runs as standalone (no browser chrome) when added to home screen */}
-        <meta name="apple-mobile-web-app-capable" content="yes" />
-        {/* black-translucent: status bar overlays the app (uses safe-area-inset) */}
-        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Deeni.tv" />
-        {/* Touch icons shown on iOS home screen */}
-        <link rel="apple-touch-icon" href="/favicon-180x180.png" />
-        <link rel="apple-touch-icon" sizes="180x180" href="/favicon-180x180.png" />
-        <link rel="apple-touch-icon" sizes="192x192" href="/favicon-192x192.png" />
-        {/* Splash screens — shown while PWA is launching (optional but polished) */}
-        <meta name="apple-touch-fullscreen" content="yes" />
-
-        {/* ── Android / Chrome PWA ── */}
-        <meta name="mobile-web-app-capable" content="yes" />
-        {/* Disables tap highlight rectangle on Android */}
-        <meta name="msapplication-tap-highlight" content="no" />
-
-        {/* ── Prevent unwanted browser behaviours ── */}
-        {/* Stops iOS from auto-linking phone numbers / addresses */}
-        <meta name="format-detection" content="telephone=no, address=no, email=no" />
-        {/* Disable automatic translation prompts */}
-        <meta name="google" content="notranslate" />
-
-        {/* ── Safari pinned-tab icon ── */}
-        <link rel="mask-icon" href="/DeeniTV.svg" color="#ffffff" />
-
-        {/* ── MS Application tile ── */}
-        <meta name="msapplication-TileImage" content="/favicon-256x256.png" />
-        <meta name="msapplication-TileColor" content="#000000" />
-
-        {/* ── PWA Compatibility shim (adds missing iOS meta from manifest) ── */}
-        <script
-          async
-          src="https://cdn.jsdelivr.net/npm/pwacompat"
-          crossOrigin="anonymous"
-        />
-
-
-        {/* ── Google Analytics (gtag.js) ── */}
-        {process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID ? (
+      <head suppressHydrationWarning>
+        {GA_TRACKING_ID && (
           <>
-            <script
-              async
-              src={`https://www.googletagmanager.com/gtag/js?id=${process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID}`}
+            <Script
+              src={`https://www.googletagmanager.com/gtag/js?id=${GA_TRACKING_ID}`}
+              strategy="afterInteractive"
             />
-            <script
-              dangerouslySetInnerHTML={{
-                __html: `
-                  window.dataLayer = window.dataLayer || [];
-                  function gtag(){dataLayer.push(arguments);}
-                  gtag('js', new Date());
-                  gtag('config', '${process.env.NEXT_PUBLIC_GOOGLE_ANALYTICS_ID}', {
-                    page_path: window.location.pathname,
-                  });
-                `,
-              }}
-            />
+            <Script id="gtag-init" strategy="afterInteractive">
+              {`
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${GA_TRACKING_ID}');
+              `}
+            </Script>
           </>
-        ) : (
-          <script
-            // insert a harmless comment when the ID is missing so we can inspect <head>
-            dangerouslySetInnerHTML={{
-              __html: `console.warn('Google Analytics ID is not set. see .env.local');`,
-            }}
-          />
         )}
       </head>
-      <body 
-        className="font-sans antialiased bg-zinc-950 text-white"
+      <body
+        className="font-sans antialiased bg-[#09090b] text-white"
+        style={{ backgroundColor: '#09090b' }}
         suppressHydrationWarning={true}
       >
-        <div id="root">
+        <div id="root" suppressHydrationWarning>
           {children}
         </div>
         <Analytics />

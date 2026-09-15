@@ -386,7 +386,19 @@ export function clearPreviousVideos(channelId: string): void {
   }
 }
 
-// Get channel programs (falls back to Bangla if channel has no programs)
+// True only when this channel has its own embedded programs (currently just Bangla).
+// Callers use this to detect when getChannelPrograms() is about to substitute
+// a different channel's content, so they can surface that instead of staying silent.
+export function channelHasEmbeddedPrograms(channelId: string): boolean {
+  const channel = CHANNELS.find(c => c.id === channelId)
+  return !!(channel?.programs && channel.programs.length > 0)
+}
+
+// Get channel programs (falls back to Bangla if channel has no programs).
+// This fallback exists so callers never divide by a zero-length schedule —
+// it is NOT a substitute for real per-channel content. Check
+// channelHasEmbeddedPrograms() first if the caller needs to know whether the
+// returned programs actually belong to the requested channel.
 export function getChannelPrograms(channelId: string): VideoProgram[] {
   const channel = CHANNELS.find(c => c.id === channelId)
   const programs = channel?.programs
@@ -403,27 +415,21 @@ export function getTotalScheduleDuration(channelId: string): number {
   return programs.reduce((sum, prog) => sum + prog.duration, 0)
 }
 
-/**
- * Calculate current program for a specific channel
- */
-export function getCurrentProgram(channelId: string): CurrentVideoData & { 
-  nextProgramStartTime: number
-  scheduleVersion: string
-  totalPrograms: number
-  channelId: string
-} {
+// Core "what's on right now" math, parameterized over an explicit programs
+// list so it can be reused for both the embedded CHANNELS data and an
+// arbitrary fetched schedule (e.g. public/api/fallback-schedule.json).
+function computeCurrentProgramFromList(channelId: string, programs: VideoProgram[]) {
   const now = Date.now()
-  const programs = getChannelPrograms(channelId)
   const totalDuration = programs.reduce((sum, prog) => sum + prog.duration, 0)
-  
+
   const elapsedSinceEpoch = Math.floor((now - MASTER_EPOCH_START) / 1000)
   const cyclePosition = elapsedSinceEpoch % totalDuration
-  
+
   let accumulatedTime = 0
   let currentProgram = programs[0]
   let currentTime = 0
   let programIndex = 0
-  
+
   for (let i = 0; i < programs.length; i++) {
     const program = programs[i]
     if (cyclePosition >= accumulatedTime && cyclePosition < accumulatedTime + program.duration) {
@@ -434,17 +440,17 @@ export function getCurrentProgram(channelId: string): CurrentVideoData & {
     }
     accumulatedTime += program.duration
   }
-  
+
   const nextProgram = programs[(programIndex + 1) % programs.length]
-  
-  const currentCycleStart = MASTER_EPOCH_START + 
+
+  const currentCycleStart = MASTER_EPOCH_START +
     Math.floor((now - MASTER_EPOCH_START) / totalDuration / 1000) * totalDuration * 1000
-  
-  const nextProgramStartTime = currentCycleStart + 
+
+  const nextProgramStartTime = currentCycleStart +
     (accumulatedTime + currentProgram.duration) * 1000
-  
+
   const timeRemaining = currentProgram.duration - currentTime
-  
+
   return {
     program: currentProgram,
     currentTime,
@@ -457,6 +463,25 @@ export function getCurrentProgram(channelId: string): CurrentVideoData & {
     scheduleVersion: SCHEDULE_VERSION,
     totalPrograms: programs.length,
     channelId
+  }
+}
+
+/**
+ * Calculate current program for a specific channel
+ */
+export function getCurrentProgram(channelId: string): CurrentVideoData & {
+  nextProgramStartTime: number
+  scheduleVersion: string
+  totalPrograms: number
+  channelId: string
+  // True when this channel has no embedded programs of its own and the
+  // returned program is substituted Bangla content instead.
+  channelUnavailable: boolean
+} {
+  const programs = getChannelPrograms(channelId)
+  return {
+    ...computeCurrentProgramFromList(channelId, programs),
+    channelUnavailable: !channelHasEmbeddedPrograms(channelId)
   }
 }
 
@@ -501,6 +526,13 @@ export function getUpcomingPrograms(channelId: string, count: number = 15): Upco
 }
 
 /**
+ * Check scheduled preloads (for preload service)
+ */
+export function checkScheduledPreloads(channelId: string = getSavedChannel() || 'bangla-1'): ScheduledPreload[] {
+  return getUpcomingPrograms(channelId, 20).scheduledPreloads
+}
+
+/**
  * Get previous programs from localStorage for a channel
  */
 export function getPreviousPrograms(channelId: string, count: number = 15): VideoProgram[] {
@@ -525,6 +557,29 @@ export function formatTime(seconds: number): string {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
   return `0:${secs.toString().padStart(2, '0')}`
+}
+
+/**
+ * Calculate an adjusted live seek time for resuming after app backgrounding.
+ *
+ * @param serverSeekTo  seconds into the current program reported by API
+ * @param programDuration  duration of the current program in seconds
+ * @param backgroundMs  milliseconds elapsed while app was hidden
+ * @param networkMs  milliseconds it took to fetch the API response
+ * @param clamp  when true, caps at programDuration; when false, allows overflow
+ */
+export function getAdjustedLiveSeekTime(
+  serverSeekTo: number,
+  programDuration: number,
+  backgroundMs: number = 0,
+  networkMs: number = 0,
+  clamp: boolean = true,
+): number {
+  const offsetSeconds = (backgroundMs + networkMs) / 1000
+  const adjusted = serverSeekTo + offsetSeconds
+  if (adjusted < 0) return 0
+  if (clamp && adjusted > programDuration) return programDuration
+  return adjusted
 }
 
 /**
@@ -578,4 +633,167 @@ export function saveApiChannels(channels: ApiChannel[]): void {
   } catch (error) {
     console.error('Error saving API channels:', error)
   }
+}
+
+function buildLocalProgramRange(programs: VideoProgram[], startTime: number, count: number) {
+  const items: Array<{ ytVideoId: string; title: string; duration: number; startTime: number; endTime: number }> = []
+  let currentStart = startTime
+
+  for (let i = 0; i < count; i++) {
+    const program = programs[i % programs.length]
+    const endTime = currentStart + (program.duration * 1000)
+    items.push({
+      ytVideoId: program.videoId,
+      title: program.title,
+      duration: program.duration,
+      startTime: currentStart,
+      endTime,
+    })
+    currentStart = endTime
+  }
+
+  return items
+}
+
+/**
+ * Build an API-compatible current video response from the embedded CHANNELS data.
+ * Used by Android-only client fallback when network fetches fail.
+ */
+export function buildLocalCurrentVideoResponse(channelId: string, count: number = 15) {
+  const current = getCurrentProgram(channelId)
+  const programs = getChannelPrograms(channelId)
+  const currentStartTime = current.serverTime - (current.currentTime * 1000)
+  const currentEndTime = currentStartTime + (current.program.duration * 1000)
+
+  const upcomingPrograms = getUpcomingPrograms(channelId, count).upcoming
+  const previousPrograms = getPreviousPrograms(channelId, count)
+
+  return {
+    serverTime: current.serverTime,
+    currentProgram: {
+      ytVideoId: current.program.videoId,
+      title: current.program.title,
+      duration: current.program.duration,
+      seekTo: current.currentTime,
+      startTime: currentStartTime,
+      endTime: currentEndTime,
+    },
+    previousPrograms: buildLocalProgramRange(previousPrograms.reverse(), currentStartTime - previousPrograms.reduce((sum, program) => sum + program.duration * 1000, 0), Math.min(previousPrograms.length, count)),
+    upcomingPrograms: buildLocalProgramRange(upcomingPrograms, currentEndTime, Math.min(upcomingPrograms.length, count)),
+    _source: 'local-schedule',
+    // True when this channel has no embedded data of its own and the
+    // content above is substituted Bangla programming instead.
+    channelUnavailable: current.channelUnavailable,
+  }
+}
+
+/**
+ * Same as buildLocalCurrentVideoResponse, but computed from an explicit
+ * programs list (e.g. fetched from public/api/fallback-schedule.json)
+ * instead of the hardcoded embedded CHANNELS data. Falls back to
+ * buildLocalCurrentVideoResponse if the given list is empty.
+ */
+export function buildLocalCurrentVideoResponseFromPrograms(
+  channelId: string,
+  programs: VideoProgram[],
+  count: number = 15
+) {
+  if (!programs || programs.length === 0) {
+    return buildLocalCurrentVideoResponse(channelId, count)
+  }
+
+  const current = computeCurrentProgramFromList(channelId, programs)
+  const currentStartTime = current.serverTime - (current.currentTime * 1000)
+  const currentEndTime = currentStartTime + (current.program.duration * 1000)
+
+  const upcomingItems: VideoProgram[] = []
+  for (let i = 1; i <= count; i++) {
+    upcomingItems.push(programs[(current.programIndex + i) % programs.length])
+  }
+
+  return {
+    serverTime: current.serverTime,
+    currentProgram: {
+      ytVideoId: current.program.videoId,
+      title: current.program.title,
+      duration: current.program.duration,
+      seekTo: current.currentTime,
+      startTime: currentStartTime,
+      endTime: currentEndTime,
+    },
+    // No localStorage-backed watch history for an arbitrary fetched list.
+    previousPrograms: [],
+    upcomingPrograms: buildLocalProgramRange(upcomingItems, currentEndTime, Math.min(upcomingItems.length, count)),
+    _source: 'local-schedule-json',
+    channelUnavailable: false,
+  }
+}
+
+/**
+ * Build a channel-list fallback that matches the external API shape.
+ * Used by Android-only client fallback when the remote channel API is unavailable.
+ */
+export function getFallbackApiChannels(): ApiChannel[] {
+  return CHANNELS.map((channel, index) => ({
+    id: index + 1,
+    title: channel.name,
+    localizationId: String(getChannelLid(channel.id)),
+    isQuran: isQuranChannel(channel.id),
+  }))
+}
+
+/**
+ * Load local schedule data from public assets.
+ * Used by Android APK to run fully offline without remote API dependency.
+ * 
+ * @returns Local schedule data with embedded programs for all channels
+ */
+export async function loadLocalScheduleData(): Promise<any> {
+  if (typeof window === 'undefined') return null
+  
+  try {
+    const response = await fetch('/api/fallback-schedule.json', {
+      cache: 'force-cache'
+    })
+    
+    if (!response.ok) {
+      console.warn('Failed to load local schedule:', response.status)
+      return null
+    }
+    
+    return await response.json()
+  } catch (error) {
+    console.warn('Error loading local schedule data:', error)
+    return null
+  }
+}
+
+/**
+ * Fetch schedule data from local assets on Android.
+ * Falls back to embedded CHANNELS if local file not available.
+ * 
+ * @param channelId - The channel ID to fetch
+ * @returns Local schedule response compatible with API format
+ */
+export async function fetchLocalScheduleData(channelId: string) {
+  try {
+    // Try to load from local asset first
+    const localData = await loadLocalScheduleData()
+    if (localData?.channels) {
+      // Successfully loaded from local asset
+      const channel = localData.channels.find((ch: any) => ch.id === channelId)
+      if (channel && channel.programs && channel.programs.length > 0) {
+        // Use the schedule actually fetched from the JSON asset, not the
+        // hardcoded embedded CHANNELS data — this is what makes the JSON
+        // file editable (see ANDROID-OFFLINE-GUIDE.md "Update Embedded
+        // Schedule") without needing an app rebuild.
+        return buildLocalCurrentVideoResponseFromPrograms(channelId, channel.programs, 15)
+      }
+    }
+  } catch (error) {
+    console.warn('Error with local asset, falling back to embedded data:', error)
+  }
+
+  // Fallback to embedded schedule
+  return buildLocalCurrentVideoResponse(channelId, 15)
 }

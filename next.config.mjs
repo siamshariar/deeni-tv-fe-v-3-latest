@@ -8,6 +8,37 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  // NOTE: this project previously had an unused STATIC_EXPORT env toggle for
+  // `output: 'export'` here. Removed rather than merged forward — verified
+  // by actually running `STATIC_EXPORT=true next build` that it fails
+  // outright (`export const dynamic = "force-dynamic"` on /api/sync-ping,
+  // /api/live-schedule, /api/donation-url is incompatible with
+  // `output: 'export'`). The Android build genuinely uses the
+  // `build:android-web` script (regular server build + manual asset copy
+  // into out/), not Next's static export mode — see ANDROID-OFFLINE-GUIDE.md.
+  // Silences Turbopack's "webpack config with no turbopack config" warning
+  // (next-pwa below adds a webpack config).
+  turbopack: {},
+  // Allow cross-origin requests from the Android emulator during `next dev`.
+  allowedDevOrigins: ['10.0.2.2', 'localhost', '192.168.0.5'],
+  // Enable CORS only in development (e.g. for the Android emulator hitting
+  // the dev server directly).
+  async headers() {
+    if (process.env.NODE_ENV === 'production') {
+      return []
+    }
+
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Access-Control-Allow-Origin', value: '*' },
+          { key: 'Access-Control-Allow-Methods', value: 'GET,OPTIONS,PATCH,DELETE,POST,PUT' },
+          { key: 'Access-Control-Allow-Headers', value: 'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version' },
+        ],
+      },
+    ]
+  },
 }
 
 export default withPWA({
@@ -53,7 +84,11 @@ export default withPWA({
         }
       },
       {
-        urlPattern: /\/api\/.*/i,
+        urlPattern: /\/api\/donation-url/i,
+        handler: 'NetworkOnly'
+      },
+      {
+        urlPattern: /\/api\/(?!donation-url).*/i,
         handler: 'NetworkFirst',
         options: {
           cacheName: 'api-cache',

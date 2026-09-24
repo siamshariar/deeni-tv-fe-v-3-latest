@@ -72,6 +72,13 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
     if (typeof player?.unMute === 'function') player.unMute()
   }
 
+  // YouTube may still switch auto-captions on (viewer/locale preference) even
+  // with cc_load_policy=0 — they rendered over the video. Unload the module.
+  const hideCaptions = (player: any) => {
+    try { player?.unloadModule?.('captions') } catch (_) {}
+    try { player?.unloadModule?.('cc') } catch (_) {}
+  }
+
   const nextOperationToken = useCallback(() => {
     operationTokenRef.current += 1
     return operationTokenRef.current
@@ -269,6 +276,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           rel: 0,
           showinfo: 0,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no auto captions over the broadcast
           start: options.startSeconds || 0,
           playsinline: 1,
           origin: window.location.origin,
@@ -313,6 +321,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
                 }
               } catch (err) {}
             }
+            if (event.data === YT_STATE.PLAYING) hideCaptions(event.target)
             options.onStateChange?.(event.data)
           },
           onError: (event: any) => {
@@ -408,6 +417,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           rel: 0,
           showinfo: 0,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no auto captions over the broadcast
           playsinline: 1,    // mandatory for iOS inline playback
           origin: typeof window !== 'undefined' ? window.location.origin : '',
           enablejsapi: 1,
@@ -463,6 +473,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
               } catch (_) {}
             }
             
+            if (event.data === YT_STATE.PLAYING) hideCaptions(event.target)
             if (onStateChangeRef.current) {
               onStateChangeRef.current(event.data)
             }

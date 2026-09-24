@@ -23,14 +23,20 @@ interface PreviousVideosModalProps {
   openFullscreen?: boolean
 }
 
-// Branded Loading Overlay - Shows during YouTube iframe loading
+// Branded Loading Overlay - Shows during YouTube iframe loading. Same look as
+// the main player's. With `onTap` it becomes the (iOS-only, one-time) Tap to
+// Play screen: identical branded screen, a play button instead of the loading
+// bar — so iOS shows the same UI as web/Android instead of a separate screen.
 const BrandedLoadingOverlay = ({ 
   isVisible, 
-  programName 
+  programName,
+  onTap,
 }: { 
   isVisible: boolean
   programName: string
+  onTap?: () => void
 }) => {
+  const isTapMode = !!onTap
   return (
     <AnimatePresence>
       {isVisible && (
@@ -39,7 +45,10 @@ const BrandedLoadingOverlay = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3 }}
-          className="absolute inset-0 z-[45] flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black"
+          onClick={onTap}
+          role={isTapMode ? 'button' : undefined}
+          aria-label={isTapMode ? 'Tap to play' : undefined}
+          className={`absolute inset-0 z-[45] flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black ${isTapMode ? 'cursor-pointer' : ''}`}
         >
           {/* Background pattern */}
           <div className="absolute inset-0 opacity-5">
@@ -56,15 +65,17 @@ const BrandedLoadingOverlay = ({
             {/* Spinning loader ring + logo — scales with viewport */}
             <div className="relative flex items-center justify-center w-[14vmin] h-[14vmin] min-w-[3.5rem] min-h-[3.5rem] max-w-[7rem] max-h-[7rem] sm:min-w-[4.5rem] sm:min-h-[4.5rem] sm:max-w-[8rem] sm:max-h-[8rem] md:max-w-[9rem] md:max-h-[9rem]">
               <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+                animate={isTapMode ? { rotate: 0 } : { rotate: 360 }}
+                transition={{ duration: 2, repeat: isTapMode ? 0 : Infinity, ease: "linear" }}
                 className="absolute inset-0 rounded-full border-2 border-primary/20"
               />
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                className="absolute inset-0 rounded-full border-t-2 border-primary"
-              />
+              {!isTapMode && (
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
+                  className="absolute inset-0 rounded-full border-t-2 border-primary"
+                />
+              )}
               {/* Logo image — 40% of the spinner circle */}
               <img 
                 src="/DeeniTV-V-2.png" 
@@ -82,24 +93,36 @@ const BrandedLoadingOverlay = ({
                 className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl px-3 py-2 sm:px-4 sm:py-2.5 md:px-5 md:py-3"
               >
                 <p className="text-white/50 uppercase tracking-wider font-medium text-[7px] sm:text-[9px] md:text-[10px] mb-0.5 sm:mb-1">
-                  Now Loading
+                  Watching
                 </p>
-                <h3 className="text-white font-bold leading-tight line-clamp-2 text-xs sm:text-sm md:text-base lg:text-lg">
+                <h3 className="text-white font-bold leading-tight line-clamp-2 text-sm sm:text-base md:text-lg lg:text-xl">
                   {programName || 'Loading program...'}
                 </h3>
               </motion.div>
             </div>
             
-            {/* Loading bar animation */}
-            <motion.div 
-              className="w-[25vmin] min-w-[6rem] max-w-[12rem] h-1 bg-white/10 rounded-full overflow-hidden"
-            >
+            {isTapMode ? (
               <motion.div
-                animate={{ x: ['-100%', '100%'] }}
-                transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
-                className="h-full w-full bg-gradient-to-r from-transparent via-primary to-transparent"
-              />
-            </motion.div>
+                initial={{ scale: 0.9, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: 'spring', damping: 15 }}
+                className="flex items-center gap-2 rounded-full bg-white/15 border border-white/20 backdrop-blur-md px-4 py-2 sm:px-5 sm:py-2.5 text-white shadow-2xl"
+              >
+                <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-white" />
+                <span className="text-xs sm:text-sm font-semibold">Tap to Play</span>
+              </motion.div>
+            ) : (
+              /* Loading bar animation */
+              <motion.div 
+                className="w-[25vmin] min-w-[6rem] max-w-[12rem] h-1 bg-white/10 rounded-full overflow-hidden"
+              >
+                <motion.div
+                  animate={{ x: ['-100%', '100%'] }}
+                  transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                  className="h-full w-full bg-gradient-to-r from-transparent via-primary to-transparent"
+                />
+              </motion.div>
+            )}
           </motion.div>
         </motion.div>
       )}
@@ -241,7 +264,7 @@ const MAX_BUFFERING_WAIT_MS = 12000
 // YouTube's start overlay (title bar, "More videos") never shows.
 const REVEAL_AFTER_PLAYING_MS = 3500
 const REVEAL_MAX_WAIT_MS = 6000
-const CONTROLS_HIDE_MS = 3000
+const CONTROLS_HIDE_MS = 3500
 const SKIP_SECONDS = 10
 
 // Format seconds → M:SS or H:MM:SS
@@ -501,6 +524,7 @@ const PreviousVideoPlayer = ({
           rel: 0,
           showinfo: 0,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no auto captions
           disablekb: 1,
           fs: 0,
           enablejsapi: 1,
@@ -525,6 +549,8 @@ const PreviousVideoPlayer = ({
             switch (event.data) {
               case YT_STATE.PLAYING: {
                 clearWatchdog()
+                // YouTube may still turn auto-captions on — keep them off
+                try { event.target.unloadModule?.('captions'); event.target.unloadModule?.('cc') } catch {}
                 // Closed while it was still loading — don't play in the background.
                 if (!isOpenRef.current) {
                   try { event.target.pauseVideo() } catch {}
@@ -899,7 +925,7 @@ const PreviousVideoPlayer = ({
         )}
       </div>
 
-      <Button variant="ghost" size="icon" onClick={toggleFullscreen} className={buttonCls} title={isFullscreen ? 'Exit full screen' : 'Full screen'} aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}>
+      <Button variant="ghost" size="icon" onClick={() => { toggleFullscreen(); bumpControls() }} className={buttonCls} title={isFullscreen ? 'Exit full screen' : 'Full screen'} aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}>
         {isFullscreen ? <Minimize className={iconCls} /> : <Maximize className={iconCls} />}
       </Button>
       <Button variant="ghost" size="icon" onClick={handleClose} className={buttonCls} title="Close" aria-label="Close previous program">
@@ -911,7 +937,7 @@ const PreviousVideoPlayer = ({
   // Same bar as the main player (logo left, round buttons), with the playback
   // buttons centred
   const controlBar = (
-    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 md:gap-4 px-6 py-4">
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 md:gap-4 px-3 py-3 sm:px-6 sm:py-4">
       <div className="flex items-center gap-2 min-w-0">
         <img src="/DeeniTV-V-2.png" alt="Deeni.tv" className={isMobile ? 'h-5' : 'h-7'} />
       </div>
@@ -963,7 +989,7 @@ const PreviousVideoPlayer = ({
           className={
             isFullscreen
               ? 'absolute inset-0 bg-black select-none'
-              : 'relative w-full aspect-video bg-black overflow-hidden shadow-2xl border border-white/10 border-b-0 rounded-t-2xl md:rounded-t-3xl select-none'
+              : 'relative w-full aspect-video bg-black overflow-hidden isolate transform-gpu shadow-2xl border border-white/10 border-b-0 rounded-t-2xl md:rounded-t-3xl select-none'
           }
         >
           {/* Persistent YT.Player mounts here — never cleared on close */}
@@ -1015,27 +1041,13 @@ const PreviousVideoPlayer = ({
             </div>
           )}
 
-          {/* Branded loading overlay */}
-          <BrandedLoadingOverlay isVisible={isOpen && isVideoLoading && !needsTap} programName={title} />
-
-          {/* Tap to Play — only if iOS blocked the start (at most the first time,
-              since the player instance is reused afterwards) */}
-          {needsTap && (
-            <button
-              type="button"
-              onClick={handleTapToPlay}
-              className="absolute inset-0 z-[50] flex items-center justify-center bg-black bg-cover bg-center cursor-pointer"
-              style={video ? { backgroundImage: `url(https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg)` } : undefined}
-            >
-              <div className="absolute inset-0 bg-black/55" />
-              <div className="relative flex flex-col items-center gap-3">
-                <div className="rounded-full bg-white/15 backdrop-blur-md border border-white/20 p-5 shadow-2xl">
-                  <Play className={`${isMobile ? 'h-10 w-10' : 'h-12 w-12'} text-white fill-white`} />
-                </div>
-                <span className="text-white/90 text-sm font-medium">Tap to Play</span>
-              </div>
-            </button>
-          )}
+          {/* Branded loading overlay — also the Tap to Play screen (same UI on
+              iOS as web/Android; Tap to Play appears at most the first time) */}
+          <BrandedLoadingOverlay
+            isVisible={isOpen && (isVideoLoading || needsTap)}
+            programName={title}
+            onTap={needsTap ? handleTapToPlay : undefined}
+          />
         </div>
 
         {/* Bottom bar — same as the main player; floats and auto-hides in fullscreen */}

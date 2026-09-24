@@ -865,6 +865,19 @@ export function SyncedVideoPlayer({
   // z-50: above the Donate button, below the page's modals (which render after
   // the player at z-50) and the player's own modals (z-60+)
   const { isFullscreen, fullscreenStyle, toggleFullscreen } = useFullscreen({ zIndex: 50 })
+  // Fullscreen: the bar overlays the video and hides itself; a tap / mouse move
+  // shows it for FS_CONTROLS_HIDE_MS.
+  const FS_CONTROLS_HIDE_MS = 3500
+  const [fsControlsVisible, setFsControlsVisible] = useState(true)
+  const fsControlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const bumpFsControls = useCallback(() => {
+    setFsControlsVisible(true)
+    if (fsControlsTimerRef.current) clearTimeout(fsControlsTimerRef.current)
+    fsControlsTimerRef.current = setTimeout(() => setFsControlsVisible(false), FS_CONTROLS_HIDE_MS)
+  }, [])
+  useEffect(() => () => {
+    if (fsControlsTimerRef.current) clearTimeout(fsControlsTimerRef.current)
+  }, [])
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const volumeHideTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const autoUnmuteTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -2792,14 +2805,16 @@ export function SyncedVideoPlayer({
     <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-dvh w-full overflow-hidden" suppressHydrationWarning>
       <div
         style={fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')}
-        className={isFullscreen ? 'relative flex flex-col overflow-hidden bg-black' : 'relative'}
+        className={isFullscreen ? `relative overflow-hidden bg-black ${fsControlsVisible ? '' : 'cursor-none'}` : 'relative'}
+        onPointerDown={isFullscreen ? bumpFsControls : undefined}
+        onMouseMove={isFullscreen ? bumpFsControls : undefined}
       >
         <div 
           ref={playerRef}
           className={
             isFullscreen
-              ? 'relative w-full flex-1 min-h-0 bg-black overflow-hidden'
-              : 'relative w-full aspect-video bg-black/50 backdrop-blur-sm overflow-hidden shadow-2xl border border-white/10 border-b-0 transition-all duration-300 rounded-t-2xl md:rounded-t-3xl rounded-b-none'
+              ? 'absolute inset-0 bg-black overflow-hidden'
+              : 'relative w-full aspect-video bg-black/50 backdrop-blur-sm overflow-hidden isolate transform-gpu shadow-2xl border border-white/10 border-b-0 transition-all duration-300 rounded-t-2xl md:rounded-t-3xl rounded-b-none'
           }
         >
           {/* YouTube iframe container — stays opacity:0 until the real video fires
@@ -3077,17 +3092,22 @@ export function SyncedVideoPlayer({
         </div>
 
         {/* Bottom Controls - OUTSIDE video frame - ALWAYS VISIBLE - Unified with iframe */}
-        <div className="w-full flex-shrink-0">
-          <div className={`bg-black/60 backdrop-blur-xl border-white/10 px-6 py-4 ${
+        <div className={
+          isFullscreen
+            ? `absolute inset-x-0 bottom-0 z-40 transition-opacity duration-300 ${fsControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
+            : 'w-full'
+        }>
+          <div className={`bg-black/60 backdrop-blur-xl border-white/10 px-3 py-3 sm:px-6 sm:py-4 ${
             isFullscreen ? 'border-t' : 'border border-t-0 rounded-b-2xl md:rounded-b-3xl'
           }`}>
             <div className="flex items-center justify-between gap-2 md:gap-4">
                     {/* Logo Section - Replaces sound bar */}
-              <div className="flex items-center gap-2 flex-shrink-0">
+              {/* Logo shrinks first when a very narrow phone (320px) can't fit it + all buttons */}
+              <div className="flex items-center gap-2 min-w-0 shrink">
                 <img 
                   src="/DeeniTV-V-2.png" 
                   alt="Deeni.tv"
-                  className={isMobile ? 'h-5' : 'h-7'}
+                  className={`${isMobile ? 'h-5' : 'h-7'} w-auto max-w-full object-contain object-left`}
                 />
               </div>
 
@@ -3145,7 +3165,7 @@ export function SyncedVideoPlayer({
                   { icon: History, onClick: () => setShowPreviousModal(true), title: 'Watched Program' },
                   { icon: Globe, onClick: () => handleOpenChannelSelector(), title: 'Channel' },
                   { icon: RefreshCw, onClick: handleReload, title: 'Refresh' },
-                  { icon: isFullscreen ? Minimize : Maximize, onClick: toggleFullscreen, title: isFullscreen ? 'Exit full screen' : 'Full screen' },
+                  { icon: isFullscreen ? Minimize : Maximize, onClick: () => { toggleFullscreen(); bumpFsControls() }, title: isFullscreen ? 'Exit full screen' : 'Full screen' },
                   { icon: MoreHorizontal, onClick: onMenuOpen, title: 'Menu' },
                 ].map((item, index) => (
                   <motion.div
@@ -3214,12 +3234,15 @@ export function SyncedVideoPlayer({
           setYouTubeMuted(false)
           setIsMuted(false)
           play()
-          // iOS may still be handing playback back from the previous player —
-          // retry shortly so the live stream resumes right away, not seconds later.
-          for (const delay of [600, 1800]) {
+          // iOS may still be handing playback/audio back from the previous
+          // player and silently drop the first play/unmute — re-apply both
+          // shortly so the live stream is audible right away, not seconds later.
+          for (const delay of [600, 1800, 3500]) {
             setTimeout(() => {
               if (!mountedRef.current || previousPlayerActiveRef.current) return
               play()
+              setYouTubeMuted(false)
+              setYouTubeVolume(volume)
             }, delay)
           }
           // Do NOT close the Previous Programs modal - it stays open

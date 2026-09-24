@@ -1,13 +1,14 @@
 'use client'
 
 import { motion, AnimatePresence } from 'framer-motion'
-import { X, Clock, History, Play, Pause, ArrowLeft, Volume2, Volume1, Volume, VolumeX } from 'lucide-react'
+import { X, Clock, History, Play, Pause, Volume2, Volume1, Volume, VolumeX, Maximize, Minimize, RotateCcw, RotateCw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
 import { VideoProgram } from '@/types/schedule'
 import { formatDuration } from '@/lib/schedule-utils'
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useFullscreen } from '@/hooks/use-fullscreen'
 
 interface PreviousVideosModalProps {
   isOpen: boolean
@@ -17,6 +18,8 @@ interface PreviousVideosModalProps {
   currentChannelId?: string
   onPauseMainPlayer?: () => void
   onResumeMainPlayer?: () => void
+  // Main player is fullscreen → open the previous player fullscreen too
+  openFullscreen?: boolean
 }
 
 // Branded Loading Overlay - Shows during YouTube iframe loading
@@ -210,132 +213,267 @@ const BreakingNewsTicker = ({
   )
 }
 
-// Fullscreen Video Player Modal for previous videos - No YouTube controls
-const VideoPlayerModal = ({ 
-  video, 
-  allVideos,
-  isOpen, 
-  onClose 
-}: { 
+// ─────────────────────────────────────────────────────────────────────────────
+// Previous-program player
+//
+// ONE YT.Player instance is created the first time the Previous Programs list
+// opens and is then kept alive for the rest of the page session. Closing the
+// player only pauses it and hides it; picking another program just calls
+// loadVideoById() on the same instance. iOS ties its "user allowed playback
+// with sound" permission to the media element inside that iframe, so reusing
+// the instance means the Tap-to-Play step is needed at most once (the same
+// trick the main player and Quran Tube rely on). Never destroy it on close.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface PreviousPlayerHandle {
+  // Must be called synchronously from the user's tap so iOS sees a gesture.
+  play: (video: VideoProgram) => void
+}
+
+const YT_STATE = { ENDED: 0, PLAYING: 1, PAUSED: 2, BUFFERING: 3, CUED: 5 } as const
+// If playback hasn't actually started by then (autoplay blocked), show Tap to Play.
+const PLAY_WATCHDOG_MS = 4000
+// A player that keeps reporting BUFFERING without ever playing gets Tap to Play
+// after this long instead of an endless loading screen.
+const MAX_BUFFERING_WAIT_MS = 12000
+const CONTROLS_HIDE_MS = 3000
+const SKIP_SECONDS = 10
+
+// Format seconds → M:SS or H:MM:SS
+const fmtTime = (sec: number): string => {
+  if (!sec || isNaN(sec) || sec < 0) return '0:00'
+  const hours = Math.floor(sec / 3600)
+  const minutes = Math.floor((sec % 3600) / 60)
+  const seconds = Math.floor(sec % 60)
+  if (hours > 0) {
+    return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  }
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`
+}
+
+// Chains window.onYouTubeIframeAPIReady instead of overwriting it — the main
+// player loads the same API independently.
+const loadYouTubeApi = (): Promise<void> => {
+  if (window.YT?.Player) return Promise.resolve()
+  return new Promise((resolve) => {
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const tag = document.createElement('script')
+      tag.src = 'https://www.youtube.com/iframe_api'
+      document.head.appendChild(tag)
+    }
+    const prevCallback = window.onYouTubeIframeAPIReady
+    window.onYouTubeIframeAPIReady = () => {
+      prevCallback?.()
+      resolve()
+    }
+  })
+}
+
+// Custom seek bar (instead of the Radix slider) so it keeps working when the
+// iPhone pseudo-fullscreen rotates the player 90°: in that case the bar's
+// horizontal axis runs down the screen, so we measure along clientY.
+const SeekBar = ({
+  currentTime,
+  duration,
+  rotated,
+  onSeek,
+}: {
+  currentTime: number
+  duration: number
+  rotated: boolean
+  onSeek: (seconds: number) => void
+}) => {
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [dragValue, setDragValue] = useState<number | null>(null)
+
+  const valueFromPointer = (e: React.PointerEvent) => {
+    const rect = trackRef.current?.getBoundingClientRect()
+    if (!rect || duration <= 0) return 0
+    const fraction = rotated
+      ? (e.clientY - rect.top) / rect.height
+      : (e.clientX - rect.left) / rect.width
+    return Math.min(1, Math.max(0, fraction)) * duration
+  }
+
+  const shown = dragValue ?? currentTime
+  const pct = duration > 0 ? Math.min(100, (shown / duration) * 100) : 0
+
+  return (
+    <div
+      ref={trackRef}
+      role="slider"
+      aria-label="Seek"
+      aria-valuemin={0}
+      aria-valuemax={Math.round(duration)}
+      aria-valuenow={Math.round(shown)}
+      className={`group relative flex h-5 w-full items-center touch-none ${duration > 0 ? 'cursor-pointer' : 'opacity-50'}`}
+      onClick={(e) => e.stopPropagation()}
+      onPointerDown={(e) => {
+        if (duration <= 0) return
+        e.stopPropagation()
+        e.currentTarget.setPointerCapture(e.pointerId)
+        setDragValue(valueFromPointer(e))
+      }}
+      onPointerMove={(e) => {
+        if (dragValue === null) return
+        setDragValue(valueFromPointer(e))
+      }}
+      onPointerUp={(e) => {
+        if (dragValue === null) return
+        onSeek(valueFromPointer(e))
+        setDragValue(null)
+      }}
+      onPointerCancel={() => setDragValue(null)}
+    >
+      <div className="relative h-1 w-full rounded-full bg-white/30 transition-[height] duration-150 group-hover:h-1.5">
+        <div className="absolute inset-y-0 left-0 rounded-full bg-red-600" style={{ width: `${pct}%` }} />
+        <div
+          className={`absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white shadow-[0_0_0_2px_rgba(0,0,0,0.3)] transition-transform ${
+            dragValue !== null ? 'scale-125' : 'group-hover:scale-110'
+          }`}
+          style={{ left: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// Same size/shape as the main player (synced-video-player.tsx) so opening it
+// looks like a second screen stacked exactly on top of the live one.
+const PreviousVideoPlayer = ({
+  video,
+  isOpen,
+  warmVideoId,
+  openFullscreen = false,
+  onClose,
+  controllerRef,
+}: {
   video: VideoProgram | null
-  allVideos: VideoProgram[]
   isOpen: boolean
-  onClose: () => void 
+  // When set, the persistent player is created ahead of time (cued, not playing)
+  // so the first pick can start playback inside the tap itself.
+  warmVideoId?: string
+  openFullscreen?: boolean
+  onClose: () => void
+  controllerRef: React.Ref<PreviousPlayerHandle>
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const ytPlayerRef = useRef<any>(null)
-  const progressIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const isSeekingRef = useRef(false)
+  const creatingRef = useRef(false)
+  const unmountedRef = useRef(false)
+  const playerReadyRef = useRef(false)
+  const pendingVideoIdRef = useRef<string | null>(null)
+  const isOpenRef = useRef(isOpen)
   const volumeRef = useRef(75)
-  const isMobile = useMediaQuery('(max-width: 640px)')
+  const isMutedRef = useRef(false)
+  const watchdogRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const volumeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Same breakpoints as the main player
+  const isMobile = useMediaQuery('(max-width: 768px)')
+  const isTablet = useMediaQuery('(min-width: 769px) and (max-width: 1024px)')
+  const isDesktop = useMediaQuery('(min-width: 1025px)')
+  const isCoarsePointer = useMediaQuery('(pointer: coarse)')
+
+  const [playerReady, setPlayerReady] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
+  const [isBuffering, setIsBuffering] = useState(false)
+  const [isVideoLoading, setIsVideoLoading] = useState(false)
+  const [needsTap, setNeedsTap] = useState(false)
+  const [isEnded, setIsEnded] = useState(false)
+  const [currentTime, setCurrentTime] = useState(0)
+  const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(75)
   const [isMuted, setIsMuted] = useState(false)
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(0)
-  const [playerLoaded, setPlayerLoaded] = useState(false)
-  const [isPlaying, setIsPlaying] = useState(false)
-  const [showPlaybackOverlay, setShowPlaybackOverlay] = useState(false)
-  const hideVolumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const playbackOverlayTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [controlsVisible, setControlsVisible] = useState(true)
+  const { fsMode, isFullscreen, rotated, fullscreenStyle, enterFullscreen, exitFullscreen, toggleFullscreen } = useFullscreen({ zIndex: 100 })
 
-  // ── iOS detection ──
-  const isIOS = useMemo(() => {
-    if (typeof navigator === 'undefined') return false
-    return (
-      /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-      (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-    )
-  }, [])
+  useEffect(() => {
+    isOpenRef.current = isOpen
+  }, [isOpen])
 
-  // On iOS, autoplay is blocked. We show a tap-to-play overlay after the
-  // branded loading screen; tapping it calls playVideo() on the YT Player
-  // instance inside the user-gesture window, which iOS accepts.
-  const [hasStarted, setHasStarted] = useState(false)
-
-  const clearPlaybackOverlayTimer = useCallback(() => {
-    if (playbackOverlayTimerRef.current) {
-      clearTimeout(playbackOverlayTimerRef.current)
-      playbackOverlayTimerRef.current = null
+  const clearWatchdog = useCallback(() => {
+    if (watchdogRef.current) {
+      clearTimeout(watchdogRef.current)
+      watchdogRef.current = null
     }
   }, [])
 
-  const showPlaybackOverlayTemporarily = useCallback((delayMs: number = 900) => {
-    setShowPlaybackOverlay(true)
-    clearPlaybackOverlayTimer()
-    playbackOverlayTimerRef.current = setTimeout(() => {
-      setShowPlaybackOverlay(false)
-    }, delayMs)
-  }, [clearPlaybackOverlayTimer])
+  // Only give up once the player is still idle (never reached BUFFERING/PLAYING),
+  // which is what a blocked autoplay looks like. Slow networks keep buffering
+  // and must not get the Tap to Play prompt.
+  const armWatchdog = useCallback(() => {
+    clearWatchdog()
+    const armedAt = Date.now()
+    const check = () => {
+      let state: number | undefined
+      try { state = ytPlayerRef.current?.getPlayerState?.() } catch {}
+      if (state === YT_STATE.PLAYING) return
+      if (state === YT_STATE.BUFFERING && Date.now() - armedAt < MAX_BUFFERING_WAIT_MS) {
+        watchdogRef.current = setTimeout(check, PLAY_WATCHDOG_MS)
+        return
+      }
+      if (!isOpenRef.current) return
+      setIsVideoLoading(false)
+      setNeedsTap(true)
+    }
+    watchdogRef.current = setTimeout(check, PLAY_WATCHDOG_MS)
+  }, [clearWatchdog])
 
-  const handleiOSPlay = useCallback(() => {
+  const bumpControls = useCallback(() => {
+    setControlsVisible(true)
+    if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
+    controlsTimerRef.current = setTimeout(() => setControlsVisible(false), CONTROLS_HIDE_MS)
+  }, [])
+
+  // Starts a video on the existing player. Everything up to playVideo() is
+  // synchronous so it stays inside the caller's user gesture on iOS.
+  const startVideo = useCallback((videoId: string) => {
+    const player = ytPlayerRef.current
+    if (!player) return
+    pendingVideoIdRef.current = null
+    setIsEnded(false)
+    setNeedsTap(false)
+    setIsPlaying(false)
+    setIsBuffering(false)
+    setIsVideoLoading(true)
+    setCurrentTime(0)
+    setDuration(0)
     try {
-      ytPlayerRef.current?.playVideo()
+      player.loadVideoById({ videoId, startSeconds: 0 })
+      if (isMutedRef.current) {
+        player.mute()
+      } else {
+        player.unMute()
+        player.setVolume(volumeRef.current)
+      }
+      player.playVideo()
     } catch {}
-    setHasStarted(true)
-    setIsPlaying(true)
-    showPlaybackOverlayTemporarily()
-  }, [showPlaybackOverlayTemporarily])
+    armWatchdog()
+  }, [armWatchdog])
 
-  // Reset hasStarted when modal opens / video changes
-  useEffect(() => {
-    if (isOpen) {
-      setHasStarted(false)
-      setPlayerLoaded(false)
-      setIsPlaying(false)
-      setShowPlaybackOverlay(false)
-      setCurrentTime(0)
-      setDuration(0)
-      clearPlaybackOverlayTimer()
-    }
-  }, [isOpen, video?.videoId, clearPlaybackOverlayTimer])
+  const ensurePlayer = useCallback((initialVideoId: string) => {
+    if (creatingRef.current || ytPlayerRef.current) return
+    creatingRef.current = true
 
-  // Format seconds → M:SS or H:MM:SS
-  const fmtTime = (sec: number): string => {
-    if (!sec || isNaN(sec) || sec < 0) return '0:00'
-    const hours = Math.floor(sec / 3600)
-    const minutes = Math.floor((sec % 3600) / 60)
-    const seconds = Math.floor(sec % 60)
-    if (hours > 0) {
-      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-    }
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`
-  }
-
-  // Initialise YT Player API when modal opens
-  useEffect(() => {
-    if (!isOpen || !video) return
-    let destroyed = false
-
-    const startPolling = () => {
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current)
-      progressIntervalRef.current = setInterval(() => {
-        if (destroyed || !ytPlayerRef.current) return
-        try {
-          const t = ytPlayerRef.current.getCurrentTime?.() ?? 0
-          const d = ytPlayerRef.current.getDuration?.() ?? 0
-          if (!isSeekingRef.current && typeof t === 'number') setCurrentTime(t)
-          if (typeof d === 'number' && d > 0) setDuration(d)
-        } catch {}
-      }, 250)
-    }
-
-    const createPlayer = () => {
-      if (destroyed || !containerRef.current || !window.YT?.Player) return
-      if (ytPlayerRef.current?.destroy) {
-        try { ytPlayerRef.current.destroy() } catch {}
-        ytPlayerRef.current = null
+    loadYouTubeApi().then(() => {
+      if (unmountedRef.current || !containerRef.current || !window.YT?.Player) {
+        creatingRef.current = false
+        return
       }
       containerRef.current.innerHTML = ''
-      const playerId = `watch-yt-${Date.now()}`
       const div = document.createElement('div')
-      div.id = playerId
+      div.id = `previous-yt-${Date.now()}`
       containerRef.current.appendChild(div)
 
-      ytPlayerRef.current = new window.YT.Player(playerId, {
-        videoId: video.videoId,
+      ytPlayerRef.current = new window.YT.Player(div.id, {
+        width: '100%',
+        height: '100%',
+        videoId: initialVideoId,
         playerVars: {
-          autoplay: 1,
+          autoplay: 0,
           controls: 0,
           modestbranding: 1,
           rel: 0,
@@ -349,41 +487,66 @@ const VideoPlayerModal = ({
         },
         events: {
           onReady: (event: any) => {
-            if (destroyed) return
-            try {
-              event.target.setVolume(volumeRef.current)
-              event.target.unMute()
-              // On non-iOS, autoplay immediately; on iOS we wait for user tap
-              if (!isIOS) {
-                event.target.playVideo()
-                setIsPlaying(true)
-                showPlaybackOverlayTemporarily()
-              }
-              const d = event.target.getDuration()
-              if (typeof d === 'number' && d > 0) setDuration(d)
-              setPlayerLoaded(true)
-            } catch {}
-            startPolling()
+            if (unmountedRef.current) return
+            playerReadyRef.current = true
+            setPlayerReady(true)
+            try { event.target.setVolume(volumeRef.current) } catch {}
+            // A program was picked before the player finished booting. This is
+            // outside the tap, so iOS may block it — the watchdog then shows
+            // Tap to Play (first time only).
+            if (pendingVideoIdRef.current && isOpenRef.current) {
+              startVideo(pendingVideoIdRef.current)
+            }
           },
           onStateChange: (event: any) => {
-            if (destroyed) return
-            if (event.data === 1 || event.data === 5) {
-              setIsPlaying(true)
-              try {
-                const d = ytPlayerRef.current?.getDuration?.() ?? 0
-                if (d > 0) setDuration(d)
-              } catch {}
+            if (unmountedRef.current) return
+            switch (event.data) {
+              case YT_STATE.PLAYING: {
+                clearWatchdog()
+                // Closed while it was still loading — don't play in the background.
+                if (!isOpenRef.current) {
+                  try { event.target.pauseVideo() } catch {}
+                  return
+                }
+                setIsPlaying(true)
+                setIsBuffering(false)
+                setIsVideoLoading(false)
+                setNeedsTap(false)
+                setIsEnded(false)
+                bumpControls()
+                try {
+                  const d = event.target.getDuration()
+                  if (typeof d === 'number' && d > 0) setDuration(d)
+                } catch {}
+                break
+              }
+              case YT_STATE.PAUSED:
+                setIsPlaying(false)
+                setIsBuffering(false)
+                break
+              case YT_STATE.BUFFERING:
+                setIsBuffering(true)
+                break
+              case YT_STATE.ENDED:
+                setIsPlaying(false)
+                setIsBuffering(false)
+                setIsEnded(true)
+                break
             }
-            if (event.data === 2) {
-              setIsPlaying(false)
-            }
+          },
+          onError: () => {
+            if (unmountedRef.current) return
+            clearWatchdog()
+            setIsVideoLoading(false)
+            setIsBuffering(false)
           },
         },
       })
 
-      // Patch iframe attributes for iOS Safari autoplay
+      // Patch iframe attributes for iOS inline playback; our own overlay
+      // receives all taps.
       const patchIframe = (attempt = 0) => {
-        if (destroyed) return
+        if (unmountedRef.current) return
         const iframe = containerRef.current?.querySelector('iframe')
         if (iframe) {
           iframe.setAttribute('playsinline', 'true')
@@ -399,42 +562,115 @@ const VideoPlayerModal = ({
         }
       }
       setTimeout(() => patchIframe(), 100)
-    }
+    })
+  }, [bumpControls, clearWatchdog, startVideo])
 
-    if (window.YT?.Player) {
-      createPlayer()
-    } else {
-      if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
-        const tag = document.createElement('script')
-        tag.src = 'https://www.youtube.com/iframe_api'
-        document.head.appendChild(tag)
-      }
-      const prevCallback = window.onYouTubeIframeAPIReady
-      window.onYouTubeIframeAPIReady = () => {
-        prevCallback?.()
-        createPlayer()
-      }
-    }
+  // Warm up the persistent player as soon as the Previous Programs list opens.
+  useEffect(() => {
+    if (warmVideoId) ensurePlayer(warmVideoId)
+  }, [warmVideoId, ensurePlayer])
 
+  // Destroy only when the whole page unmounts — never on close.
+  useEffect(() => {
+    unmountedRef.current = false
     return () => {
-      destroyed = true
-      if (progressIntervalRef.current) clearInterval(progressIntervalRef.current)
+      unmountedRef.current = true
+      if (watchdogRef.current) clearTimeout(watchdogRef.current)
+      if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
+      if (volumeHideTimerRef.current) clearTimeout(volumeHideTimerRef.current)
       if (ytPlayerRef.current?.destroy) {
         try { ytPlayerRef.current.destroy() } catch {}
-        ytPlayerRef.current = null
       }
+      ytPlayerRef.current = null
+      playerReadyRef.current = false
+      creatingRef.current = false
     }
-  }, [isOpen, video?.videoId, isIOS])
+  }, [])
 
-  // Reset the auto-hide timer for volume slider
-  const resetHideTimer = useCallback(() => {
-    if (hideVolumeTimerRef.current) clearTimeout(hideVolumeTimerRef.current)
-    hideVolumeTimerRef.current = setTimeout(() => setShowVolumeSlider(false), 3000)
+  useImperativeHandle(controllerRef, () => ({
+    play: (v: VideoProgram) => {
+      setControlsVisible(true)
+      // Match the main player: fullscreen there → fullscreen here, else normal
+      if (openFullscreen && fsMode === 'none') void enterFullscreen()
+      if (playerReadyRef.current) {
+        startVideo(v.videoId)
+      } else {
+        pendingVideoIdRef.current = v.videoId
+        setIsVideoLoading(true)
+        ensurePlayer(v.videoId)
+      }
+    },
+  }), [ensurePlayer, enterFullscreen, fsMode, openFullscreen, startVideo])
+
+  // Progress polling while visible
+  useEffect(() => {
+    if (!isOpen || !playerReady) return
+    const interval = setInterval(() => {
+      const player = ytPlayerRef.current
+      if (!player) return
+      try {
+        const t = player.getCurrentTime?.() ?? 0
+        const d = player.getDuration?.() ?? 0
+        if (typeof t === 'number') setCurrentTime(t)
+        if (typeof d === 'number' && d > 0) setDuration(d)
+      } catch {}
+    }, 250)
+    return () => clearInterval(interval)
+  }, [isOpen, playerReady])
+
+  // ── Playback controls ──
+  const togglePlayback = useCallback(() => {
+    const player = ytPlayerRef.current
+    if (!player || !playerReady) return
+    try {
+      if (isEnded) {
+        player.seekTo(0, true)
+        player.playVideo()
+        setIsEnded(false)
+      } else if (isPlaying) {
+        player.pauseVideo()
+        setIsPlaying(false)
+      } else {
+        player.playVideo()
+      }
+    } catch {}
+  }, [isEnded, isPlaying, playerReady])
+
+  const seekTo = useCallback((seconds: number) => {
+    const clamped = Math.max(0, duration > 0 ? Math.min(seconds, duration - 0.5) : seconds)
+    setCurrentTime(clamped)
+    setIsEnded(false)
+    try { ytPlayerRef.current?.seekTo(clamped, true) } catch {}
+  }, [duration])
+
+  const skip = useCallback((delta: number) => {
+    seekTo(currentTime + delta)
+  }, [currentTime, seekTo])
+
+  const handleTapToPlay = useCallback(() => {
+    const player = ytPlayerRef.current
+    if (!player) return
+    try {
+      if (!isMutedRef.current) {
+        player.unMute()
+        player.setVolume(volumeRef.current)
+      }
+      player.playVideo()
+    } catch {}
+    setNeedsTap(false)
+    setIsVideoLoading(true)
+    armWatchdog()
+  }, [armWatchdog])
+
+  const resetVolumeHideTimer = useCallback(() => {
+    if (volumeHideTimerRef.current) clearTimeout(volumeHideTimerRef.current)
+    volumeHideTimerRef.current = setTimeout(() => setShowVolumeSlider(false), 1500)
   }, [])
 
   const handleVolumeChange = useCallback((values: number[]) => {
     const v = values[0]
     volumeRef.current = v
+    isMutedRef.current = v === 0
     setVolume(v)
     setIsMuted(v === 0)
     try {
@@ -442,293 +678,334 @@ const VideoPlayerModal = ({
       if (v === 0) ytPlayerRef.current?.mute()
       else ytPlayerRef.current?.unMute()
     } catch {}
-    resetHideTimer()
-  }, [resetHideTimer])
-
-  const toggleMute = useCallback(() => {
-    setIsMuted(prev => {
-      const newMuted = !prev
-      try {
-        if (newMuted) {
-          ytPlayerRef.current?.mute()
-        } else {
-          ytPlayerRef.current?.unMute()
-          ytPlayerRef.current?.setVolume(volumeRef.current || 75)
-        }
-      } catch {}
-      return newMuted
-    })
   }, [])
 
-  const togglePlayback = useCallback(() => {
-    if (!playerLoaded || !ytPlayerRef.current) return
+  const toggleMute = useCallback(() => {
+    const newMuted = !isMutedRef.current
+    isMutedRef.current = newMuted
+    setIsMuted(newMuted)
+    try {
+      if (newMuted) {
+        ytPlayerRef.current?.mute()
+      } else {
+        if (volumeRef.current === 0) {
+          volumeRef.current = 75
+          setVolume(75)
+        }
+        ytPlayerRef.current?.unMute()
+        ytPlayerRef.current?.setVolume(volumeRef.current)
+      }
+    } catch {}
+  }, [])
 
-    if (isPlaying) {
-      try {
-        ytPlayerRef.current.pauseVideo?.()
-      } catch {}
-      setIsPlaying(false)
-      setShowPlaybackOverlay(true)
-      clearPlaybackOverlayTimer()
+  const handleClose = useCallback(() => {
+    clearWatchdog()
+    // Stop (not just pause) and mute. A paused video keeps its loaded stream
+    // and decoder, which starved the main player: after a previous program had
+    // played, every Refresh left the main video frozen on YouTube's spinner.
+    // stopVideo() releases them but keeps this same player/iframe (and so the
+    // iOS playback unlock) for the next loadVideoById(). Mute keeps it silent
+    // even if something resumes it; startVideo()/Tap to Play unmute again.
+    try {
+      ytPlayerRef.current?.stopVideo?.()
+      ytPlayerRef.current?.mute?.()
+    } catch {}
+    setIsPlaying(false)
+    setNeedsTap(false)
+    setIsVideoLoading(false)
+    if (fsMode !== 'none') exitFullscreen()
+    onClose()
+  }, [clearWatchdog, exitFullscreen, fsMode, onClose])
+
+  // Tap on the video: touch devices show/hide controls, mouse toggles play.
+  const handleSurfaceClick = useCallback(() => {
+    if (needsTap || isVideoLoading) return
+    const shown = controlsVisible || !isPlaying
+    if (isCoarsePointer) {
+      if (shown && isPlaying) {
+        if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
+        setControlsVisible(false)
+      } else {
+        bumpControls()
+      }
       return
     }
+    togglePlayback()
+    bumpControls()
+  }, [bumpControls, controlsVisible, isCoarsePointer, isPlaying, isVideoLoading, needsTap, togglePlayback])
 
-    try {
-      ytPlayerRef.current.playVideo?.()
-    } catch {}
-    setIsPlaying(true)
-    showPlaybackOverlayTemporarily()
-  }, [clearPlaybackOverlayTimer, isPlaying, playerLoaded, showPlaybackOverlayTemporarily])
-
-  // Mobile: first tap shows slider; subsequent taps while visible toggle mute
-  const handleVolumeIconClick = useCallback(() => {
-    if (isMobile) {
-      if (!showVolumeSlider) {
-        setShowVolumeSlider(true)
-        resetHideTimer()
-      } else {
-        toggleMute()
-        resetHideTimer()
+  // Keyboard shortcuts (desktop)
+  useEffect(() => {
+    if (!isOpen) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault()
+          togglePlayback()
+          bumpControls()
+          break
+        case 'ArrowLeft':
+          e.preventDefault()
+          skip(-SKIP_SECONDS)
+          bumpControls()
+          break
+        case 'ArrowRight':
+          e.preventDefault()
+          skip(SKIP_SECONDS)
+          bumpControls()
+          break
+        case 'm':
+          toggleMute()
+          break
+        case 'f':
+          toggleFullscreen()
+          break
+        case 'Escape':
+          // Fullscreen (native or pseudo) consumes Escape itself.
+          if (fsMode === 'none') handleClose()
+          break
       }
-    } else {
-      toggleMute()
     }
-  }, [isMobile, showVolumeSlider, toggleMute, resetHideTimer])
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [isOpen, fsMode, bumpControls, handleClose, skip, toggleFullscreen, toggleMute, togglePlayback])
 
-  const getVolumeIcon = (cls = 'h-4 w-4') => {
+  const getVolumeIcon = (cls: string) => {
     if (isMuted || volume === 0) return <VolumeX className={cls} />
     if (volume < 30) return <Volume className={cls} />
     if (volume < 70) return <Volume1 className={cls} />
     return <Volume2 className={cls} />
   }
 
-  if (!video) return null
+  const controlsShown = controlsVisible || !isPlaying || isEnded
+  const title = video?.title ?? ''
+  const iconCls = isMobile ? 'h-3.5 w-3.5' : 'h-4.5 w-4.5'
+  // Identical to the main player's action buttons
+  const buttonCls = `text-white/90 hover:text-white hover:bg-white/20 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 ${
+    isMobile ? 'h-7 w-7' : 'h-9 w-9'
+  }`
 
-  const iconCls = isMobile ? 'h-5 w-5' : 'h-4 w-4'
+  // Centre of the bar: back 10s / play-pause / forward 10s
+  const playbackButtons = (
+    <div className="flex items-center gap-1 md:gap-1.5">
+      <Button variant="ghost" size="icon" onClick={() => { skip(-SKIP_SECONDS); bumpControls() }} className={buttonCls} title="Back 10 seconds" aria-label="Back 10 seconds">
+        <RotateCcw className={iconCls} />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={() => { togglePlayback(); bumpControls() }}
+        className={`${buttonCls} bg-white/20`}
+        title={isEnded ? 'Replay' : isPlaying ? 'Pause' : 'Play'}
+        aria-label={isEnded ? 'Replay' : isPlaying ? 'Pause' : 'Play'}
+      >
+        {isEnded ? (
+          <RotateCcw className={iconCls} />
+        ) : isPlaying ? (
+          <Pause className={`${iconCls} fill-current`} />
+        ) : (
+          <Play className={`${iconCls} fill-current`} />
+        )}
+      </Button>
+      <Button variant="ghost" size="icon" onClick={() => { skip(SKIP_SECONDS); bumpControls() }} className={buttonCls} title="Forward 10 seconds" aria-label="Forward 10 seconds">
+        <RotateCw className={iconCls} />
+      </Button>
+    </div>
+  )
+
+  // Right of the bar: volume / fullscreen / close
+  const controlButtons = (
+    <div className="flex items-center justify-end gap-1 md:gap-1.5">
+      {/* Volume — same behaviour as the main player: hover slider on desktop, mute toggle on mobile */}
+      <div
+        className="flex items-center"
+        onMouseEnter={() => {
+          if (isMobile) return
+          if (volumeHideTimerRef.current) clearTimeout(volumeHideTimerRef.current)
+          setShowVolumeSlider(true)
+        }}
+        onMouseLeave={() => {
+          if (!isMobile) resetVolumeHideTimer()
+        }}
+      >
+        <Button variant="ghost" size="icon" onClick={toggleMute} className={buttonCls} title={isMuted ? 'Unmute' : 'Mute'} aria-label={isMuted ? 'Unmute' : 'Mute'}>
+          {getVolumeIcon(iconCls)}
+        </Button>
+        {!isMobile && (
+          <div
+            className={`flex items-center justify-start overflow-visible transition-all duration-200 origin-left ${
+              showVolumeSlider ? 'w-24 opacity-100 ml-2 scale-x-100' : 'w-0 opacity-0 ml-0 scale-x-90'
+            }`}
+          >
+            <Slider
+              value={[isMuted ? 0 : volume]}
+              onValueChange={handleVolumeChange}
+              max={100}
+              step={1}
+              className="w-full py-2 [&_[data-slot=slider-track]]:h-1 [&_[data-slot=slider-track]]:rounded-full [&_[data-slot=slider-track]]:bg-white/35 [&_[data-slot=slider-range]]:bg-red-600 [&_[data-slot=slider-thumb]]:block [&_[data-slot=slider-thumb]]:size-3 [&_[data-slot=slider-thumb]]:rounded-full [&_[data-slot=slider-thumb]]:border-0 [&_[data-slot=slider-thumb]]:bg-white [&_[data-slot=slider-thumb]]:shadow-[0_0_0_2px_rgba(0,0,0,0.3)] [&_[data-slot=slider-track]]:cursor-pointer [&_[data-slot=slider-thumb]]:cursor-pointer"
+            />
+          </div>
+        )}
+      </div>
+
+      <Button variant="ghost" size="icon" onClick={toggleFullscreen} className={buttonCls} title={isFullscreen ? 'Exit full screen' : 'Full screen'} aria-label={isFullscreen ? 'Exit full screen' : 'Full screen'}>
+        {isFullscreen ? <Minimize className={iconCls} /> : <Maximize className={iconCls} />}
+      </Button>
+      <Button variant="ghost" size="icon" onClick={handleClose} className={buttonCls} title="Close" aria-label="Close previous program">
+        <X className={iconCls} />
+      </Button>
+    </div>
+  )
+
+  // Same bar as the main player (logo left, round buttons), with the playback
+  // buttons centred
+  const controlBar = (
+    <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-1 md:gap-4 px-6 py-4">
+      <div className="flex items-center gap-2 min-w-0">
+        <img src="/DeeniTV-V-2.png" alt="Deeni.tv" className={isMobile ? 'h-5' : 'h-7'} />
+      </div>
+      {playbackButtons}
+      {controlButtons}
+    </div>
+  )
+
+  // Title sits directly above the progress bar (YouTube style)
+  const infoBlock = (
+    <div className="px-3 pt-10 pb-1 md:px-5">
+      <div className="mb-1 flex items-end justify-between gap-3">
+        <h3 className={`min-w-0 truncate font-semibold text-white drop-shadow-md ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
+          {title}
+        </h3>
+        <span className={`flex-shrink-0 font-mono tabular-nums text-white/80 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
+          {fmtTime(currentTime)} / {fmtTime(duration)}
+        </span>
+      </div>
+      <SeekBar
+        currentTime={currentTime}
+        duration={duration}
+        rotated={rotated}
+        onSeek={(s) => { seekTo(s); bumpControls() }}
+      />
+    </div>
+  )
+
+  const fadeCls = `transition-opacity duration-300 ${controlsShown ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black z-[80]"
+    <div
+      aria-hidden={!isOpen}
+      className={`fixed inset-0 z-[90] flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black transition-[opacity,visibility] duration-200 ${
+        isOpen ? 'opacity-100 visible' : 'opacity-0 invisible pointer-events-none'
+      }`}
+    >
+      <div
+        style={fullscreenStyle}
+        onMouseMove={() => { if (!isCoarsePointer) bumpControls() }}
+        className={
+          isFullscreen
+            ? `relative overflow-hidden bg-black ${controlsShown ? '' : 'cursor-none'}`
+            : `relative ${isDesktop ? 'w-[70vw] max-w-[1400px]' : isTablet ? 'w-[90vw]' : 'w-full'}`
+        }
+      >
+        {/* Video area — same frame as the main player */}
+        <div
+          className={
+            isFullscreen
+              ? 'absolute inset-0 bg-black select-none'
+              : 'relative w-full aspect-video bg-black overflow-hidden shadow-2xl border border-white/10 border-b-0 rounded-t-2xl md:rounded-t-3xl select-none'
+          }
+        >
+          {/* Persistent YT.Player mounts here — never cleared on close */}
+          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+
+          {/* Tap surface */}
+          <button
+            type="button"
+            onClick={handleSurfaceClick}
+            onDoubleClick={() => { if (!isCoarsePointer) toggleFullscreen() }}
+            className="absolute inset-0 z-20 w-full h-full cursor-pointer"
+            aria-label={isPlaying ? 'Pause previous program video' : 'Play previous program video'}
           />
 
-          {/* Fullscreen Player */}
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.95 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-[90] flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black"
-          >
-            <div className={`relative w-full ${isMobile ? 'w-full' : 'md:w-[70vw] md:max-w-[1400px]'}`}>
-
-              {/* Title bar */}
-              <div className={`w-full bg-black/80 backdrop-blur-xl border border-white/10 border-b-0 rounded-t-2xl md:rounded-t-3xl ${isMobile ? 'px-3 py-2' : 'px-4 py-3'}`}>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 flex-1 min-w-0">
-                    {/* <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={onClose}
-                      className={`text-white hover:bg-white/20 rounded-full bg-white/10 backdrop-blur-sm flex-shrink-0 ${isMobile ? 'h-8 w-8' : 'h-9 w-9'}`}
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button> */}
-                    <div className="flex-1 min-w-0">
-                      <h3 className={`text-white font-bold truncate ${isMobile ? 'text-sm' : 'text-base'}`}>
-                        {video.title}
-                      </h3>
-                      <p className="text-white/60 text-[10px] md:text-xs">
-                        {formatDuration(video.duration)}
-                      </p>
-                    </div>
-                  </div>
-                  
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={onClose}
-                    className={`text-white hover:bg-white/20 rounded-full bg-white/10 backdrop-blur-sm flex-shrink-0 ${
-                      isMobile ? 'h-8 w-8' : 'h-9 w-9'
-                    }`}
-                  >
-                    <X className={isMobile ? 'h-4 w-4' : 'h-5 w-5'} />
-                  </Button>
-                </div>
-              </div>
-
-              {/* Video container — YT Player API injects iframe here */}
-              <div className="relative w-full aspect-video bg-black overflow-hidden border-x border-white/10 select-none">
-                <div ref={containerRef} className="absolute inset-0 w-full h-full" />
-
-                {/* Transparent click wrapper for play/pause toggle */}
-                <button
-                  type="button"
-                  onClick={togglePlayback}
-                  className="absolute inset-0 z-20 w-full h-full cursor-pointer"
-                  aria-label={isPlaying ? 'Pause previous program video' : 'Play previous program video'}
-                >
-                  <AnimatePresence>
-                    {(showPlaybackOverlay || !isPlaying) && playerLoaded && (
-                      <motion.div
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 0.96 }}
-                        transition={{ duration: 0.18 }}
-                        className="absolute inset-0 flex items-center justify-center bg-black/10 backdrop-blur-[1px]"
-                      >
-                        <div className="flex h-20 w-20 items-center justify-center rounded-full border border-white/20 bg-black/45 text-white shadow-2xl shadow-black/30 md:h-24 md:w-24">
-                          {isPlaying ? (
-                            <Pause className="h-9 w-9 fill-white md:h-10 md:w-10" />
-                          ) : (
-                            <Play className="h-9 w-9 fill-white md:h-10 md:w-10" />
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </button>
-
-                {/* Branded loading overlay — shown until player is ready */}
-                <BrandedLoadingOverlay isVisible={!playerLoaded} programName={video.title} />
-
-                {/* iOS tap-to-play overlay — shown after loading, on iOS only */}
-                {isIOS && playerLoaded && !hasStarted && (
-                  <motion.button
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    onClick={handleiOSPlay}
-                    // className="absolute inset-0 z-[50] flex items-center justify-center bg-black/40 backdrop-blur-[2px] cursor-pointer"
-                    className="absolute inset-0 z-[50] flex items-center justify-center bg-black cursor-pointer"
-                  >
-                    <motion.div
-                      initial={{ scale: 0.8 }}
-                      animate={{ scale: 1 }}
-                      transition={{ type: 'spring', damping: 15 }}
-                      className="flex flex-col items-center gap-3"
-                    >
-                      <div className="rounded-full bg-white/15 backdrop-blur-md border border-white/20 p-5 shadow-2xl">
-                        <Play className={`${isMobile ? 'h-10 w-10' : 'h-12 w-12'} text-white fill-white`} />
-                      </div>
-                      <span className="text-white/80 text-sm font-medium">Tap to Play</span>
-                    </motion.div>
-                  </motion.button>
-                )}
-              </div>
-
-              {/* ─── Seek / Progress bar ─── */}
-              <div className="w-full bg-black/80 border-x border-white/10 px-3 pt-3 pb-1.5">
-                <div
-                  onPointerDown={() => { isSeekingRef.current = true }}
-                  className="w-full"
-                >
-                  <Slider
-                    value={[currentTime]}
-                    min={0}
-                    max={duration > 0 ? duration : 100}
-                    step={0.5}
-                    disabled={duration === 0}
-                    onValueChange={(v) => setCurrentTime(v[0])}
-                    onValueCommit={(v) => {
-                      isSeekingRef.current = false
-                      try { ytPlayerRef.current?.seekTo(v[0], true) } catch {}
-                    }}
-                    className="w-full cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              {/* ─── Bottom controls bar ─── */}
-              <div className={`w-full bg-black/60 backdrop-blur-xl border border-white/10 border-t-0 rounded-b-2xl md:rounded-b-3xl ${isMobile ? 'px-3 py-2' : 'px-4 py-2'}`}>
-                <div className="flex items-center gap-2">
-
-                  {/* Volume icon + slider */}
-                  <div
-                    className="relative flex items-center gap-1"
-                    onMouseEnter={() => {
-                      if (!isMobile) {
-                        setShowVolumeSlider(true)
-                        resetHideTimer()
-                      }
-                    }}
-                    onMouseLeave={() => {
-                      if (!isMobile) resetHideTimer()
-                    }}
-                  >
-                    <button
-                      onClick={handleVolumeIconClick}
-                      className={`text-white/70 hover:text-white rounded-full hover:bg-white/10 transition-colors flex items-center justify-center flex-shrink-0 ${isMobile ? 'h-9 w-9' : 'h-8 w-8'}`}
-                      aria-label={isMuted ? 'Unmute' : 'Mute'}
-                    >
-                      {getVolumeIcon(iconCls)}
-                    </button>
-
-                    {/* Volume slider — desktop hover & mobile tap */}
-                    <AnimatePresence>
-                      {showVolumeSlider && (
-                        <motion.div
-                          initial={{ opacity: 0, width: 0 }}
-                          animate={{ opacity: 1, width: 96 }}
-                          exit={{ opacity: 0, width: 0 }}
-                          transition={{ duration: 0.15 }}
-                          className="overflow-visible px-1"
-                        >
-                          <Slider
-                            value={[isMuted ? 0 : volume]}
-                            min={0}
-                            max={100}
-                            step={1}
-                            onValueChange={handleVolumeChange}
-                            className="w-full"
-                          />
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  </div>
-
-                  {/* Time display */}
-                  <span className={`text-white/50 font-mono tabular-nums ${isMobile ? 'text-[11px]' : 'text-xs'}`}>
-                    {fmtTime(currentTime)} / {fmtTime(duration)}
-                  </span>
-
-                  <div className="flex-1" />
-
-                  {/* Branding */}
-                  <img
-                    src="/DeeniTV-V-2.png"
-                    alt="Deeni.tv"
-                    className={isMobile ? 'h-4' : 'h-5'}
-                  />
-                </div>
-              </div>
+          {/* Top-right badge */}
+          <div className={`absolute top-3 right-3 z-30 ${fadeCls}`}>
+            <div className={`flex items-center gap-1.5 bg-black/70 backdrop-blur-xl rounded-full border border-white/20 ${isMobile ? 'px-2.5 py-1' : 'px-3 py-1.5'}`}>
+              <History className={isMobile ? 'h-3 w-3 text-white/80' : 'h-3.5 w-3.5 text-white/80'} />
+              <span className={`text-white font-semibold ${isMobile ? 'text-[11px]' : 'text-xs'}`}>Previous Program</span>
             </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+          </div>
+
+          {/* Buffering spinner (controls live in the bottom bar, not on the video) */}
+          {isBuffering && isPlaying && !isVideoLoading && !needsTap && (
+            <div className="absolute inset-0 z-30 flex items-center justify-center pointer-events-none">
+              <Loader2 className="h-12 w-12 animate-spin text-white/90 md:h-14 md:w-14" />
+            </div>
+          )}
+
+          {/* Title + progress (inside the video when not fullscreen) */}
+          {!isFullscreen && (
+            <div className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/50 to-transparent ${fadeCls}`}>
+              {infoBlock}
+            </div>
+          )}
+
+          {/* Branded loading overlay */}
+          <BrandedLoadingOverlay isVisible={isOpen && isVideoLoading && !needsTap} programName={title} />
+
+          {/* Tap to Play — only if iOS blocked the start (at most the first time,
+              since the player instance is reused afterwards) */}
+          {needsTap && (
+            <button
+              type="button"
+              onClick={handleTapToPlay}
+              className="absolute inset-0 z-[50] flex items-center justify-center bg-black bg-cover bg-center cursor-pointer"
+              style={video ? { backgroundImage: `url(https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg)` } : undefined}
+            >
+              <div className="absolute inset-0 bg-black/55" />
+              <div className="relative flex flex-col items-center gap-3">
+                <div className="rounded-full bg-white/15 backdrop-blur-md border border-white/20 p-5 shadow-2xl">
+                  <Play className={`${isMobile ? 'h-10 w-10' : 'h-12 w-12'} text-white fill-white`} />
+                </div>
+                <span className="text-white/90 text-sm font-medium">Tap to Play</span>
+              </div>
+            </button>
+          )}
+        </div>
+
+        {/* Bottom bar — same as the main player; floats and auto-hides in fullscreen */}
+        {isFullscreen ? (
+          <div className={`absolute inset-x-0 bottom-0 z-40 bg-gradient-to-t from-black/95 via-black/70 to-transparent ${fadeCls}`}>
+            {infoBlock}
+            {controlBar}
+          </div>
+        ) : (
+          <div className="w-full bg-black/60 backdrop-blur-xl border border-white/10 border-t-0 rounded-b-2xl md:rounded-b-3xl">
+            {controlBar}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
-export function PreviousVideosModal({ 
-  isOpen, 
-  onClose, 
-  videos, 
+export function PreviousVideosModal({
+  isOpen,
+  onClose,
+  videos,
   onPlayVideo,
   currentChannelId,
   onPauseMainPlayer,
-  onResumeMainPlayer
+  onResumeMainPlayer,
+  openFullscreen = false,
 }: PreviousVideosModalProps) {
   const isMobile = useMediaQuery('(max-width: 640px)')
   const [mounted, setMounted] = useState(false)
   const [selectedVideo, setSelectedVideo] = useState<VideoProgram | null>(null)
   const [showVideoPlayer, setShowVideoPlayer] = useState(false)
+  const playerControllerRef = useRef<PreviousPlayerHandle>(null)
 
   // Handle mounting for animations
   useEffect(() => {
@@ -739,27 +1016,31 @@ export function PreviousVideosModal({
   const handlePlayVideo = useCallback((video: VideoProgram) => {
     // Pause main TV player
     onPauseMainPlayer?.()
-    
-    // Open fullscreen video player modal
+
     setSelectedVideo(video)
     setShowVideoPlayer(true)
+    // Synchronous, inside the tap — lets iOS start playback with sound on the
+    // reused player without asking for another Tap to Play.
+    playerControllerRef.current?.play(video)
   }, [onPauseMainPlayer])
 
   const handleCloseVideoPlayer = useCallback(() => {
+    // Keep selectedVideo so the title stays during the fade-out; the player
+    // itself is only paused + hidden, never destroyed.
     setShowVideoPlayer(false)
-    setSelectedVideo(null)
     // Resume/unmute main player
     onResumeMainPlayer?.()
-    // Do NOT close this modal - keep Previous Programs modal open
-    // User can continue browsing or close it manually
-  }, [onResumeMainPlayer])
+    // Go straight back to the live TV — close the Previous Programs list too
+    onClose()
+  }, [onClose, onResumeMainPlayer])
 
   if (!mounted) return null
 
   return (
     <>
       <AnimatePresence>
-        {isOpen && (
+        {/* Unmounted while the player is open, so it never flashes on close */}
+        {isOpen && !showVideoPlayer && (
           <>
             {/* Backdrop - Not clickable */}
             <motion.div
@@ -768,7 +1049,7 @@ export function PreviousVideosModal({
               exit={{ opacity: 0 }}
               className="fixed inset-0 bg-black/80 backdrop-blur-md z-[60]"
             />
-            
+
             {/* Modal - Same style as Schedule Modal */}
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -803,7 +1084,7 @@ export function PreviousVideosModal({
                   <X className={isMobile ? 'h-7 w-7' : 'h-5 w-5'} />
                 </Button>
               </div>
-              
+
               {/* Videos List - Simplified UI */}
               <div className="overflow-y-auto max-h-[calc(80vh-80px)] p-4">
                 {videos.length === 0 ? (
@@ -829,7 +1110,7 @@ export function PreviousVideosModal({
                           <div className="flex-shrink-0 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center group-hover:bg-primary/30 transition-colors mt-0.5">
                             <Play className="h-2.5 w-2.5 text-primary fill-primary" />
                           </div>
-                          
+
                           <div className="flex-1 min-w-0">
                             <h3 className="text-white font-semibold text-sm leading-snug group-hover:text-primary transition-colors">
                               {video.title}
@@ -849,13 +1130,15 @@ export function PreviousVideosModal({
           </>
         )}
       </AnimatePresence>
-      
-      {/* Fullscreen Video Player */}
-      <VideoPlayerModal
+
+      {/* Persistent previous-program player (always mounted, hidden when closed) */}
+      <PreviousVideoPlayer
         video={selectedVideo}
-        allVideos={videos}
         isOpen={showVideoPlayer}
+        warmVideoId={isOpen ? videos[0]?.videoId : undefined}
+        openFullscreen={openFullscreen}
         onClose={handleCloseVideoPlayer}
+        controllerRef={playerControllerRef}
       />
     </>
   )

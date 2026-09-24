@@ -58,6 +58,19 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
   const onDurationChangeRef = useRef<((duration: number) => void) | null>(null)
   const onReadyRef = useRef<((player: any) => void) | null>(null)
   const apiLoadPromiseRef = useRef<Promise<void> | null>(null)
+  // While true, nothing may unmute this player — set while another player
+  // (the Previous Programs player) owns the audio. Buffering/stall recovery and
+  // PLAYING handlers would otherwise unmute it underneath (double audio).
+  const muteHoldRef = useRef<boolean>(false)
+
+  // Every unmute in this hook goes through here so the mute hold is respected.
+  const unMuteUnlessHeld = (player: any) => {
+    if (muteHoldRef.current) {
+      try { player?.mute?.() } catch (_) {}
+      return
+    }
+    if (typeof player?.unMute === 'function') player.unMute()
+  }
 
   const nextOperationToken = useCallback(() => {
     operationTokenRef.current += 1
@@ -246,7 +259,9 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
         videoId: options.videoId,
         playerVars: {
           autoplay: 1,
-          mute: options.muted ? 1 : 0,
+          // A held mute must win here too — this starts the iframe unmuted
+          // without ever calling unMute()
+          mute: options.muted || muteHoldRef.current ? 1 : 0,
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -271,10 +286,10 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
             }
             try {
               event.target.setVolume(volumeRef.current)
-              if (isMutedRef.current) {
+              if (isMutedRef.current || muteHoldRef.current) {
                 event.target.mute()
               } else {
-                event.target.unMute()
+                unMuteUnlessHeld(event.target)
               }
               
               // Get video duration from YouTube API
@@ -440,9 +455,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
                 // Small delay to ensure video is actually playing
                 setTimeout(() => {
                   try {
-                    if (typeof playerRef.current?.unMute === 'function') {
-                      playerRef.current.unMute()
-                    }
+                    unMuteUnlessHeld(playerRef.current)
                     transitionMutedRef.current = false
                     shouldUnmuteAfterPlayingRef.current = false
                   } catch (_) {}
@@ -489,13 +502,20 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
       if (typeof playerRef.current.playVideo === 'function') {
         playerRef.current.playVideo()
       }
-      if (typeof playerRef.current.unMute === 'function') {
-        playerRef.current.unMute()
-      }
+      unMuteUnlessHeld(playerRef.current)
       if (typeof playerRef.current.setVolume === 'function') {
         playerRef.current.setVolume(targetVolume)
       }
     } catch (_) {}
+  }, [])
+
+  // Hold (or release) the mute: while held, every unmute path above is a no-op.
+  // Releasing does not unmute by itself — callers unmute explicitly afterwards.
+  const setMuteHold = useCallback((hold: boolean) => {
+    muteHoldRef.current = hold
+    if (hold) {
+      try { playerRef.current?.mute?.() } catch (_) {}
+    }
   }, [])
 
   // Expose the raw loader so callers can opt-in to loading the API on-demand
@@ -610,9 +630,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           playerRef.current.mute()
         }
       } else {
-        if (typeof playerRef.current.unMute === 'function') {
-          playerRef.current.unMute()
-        }
+        unMuteUnlessHeld(playerRef.current)
       }
     } catch (err) {}
   }, [])
@@ -721,6 +739,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
     getDuration,
     setVolume,
     setMuted,
+    setMuteHold,
     play,
     seekTo,
     getCurrentTime,

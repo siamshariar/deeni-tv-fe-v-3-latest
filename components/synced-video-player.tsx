@@ -39,6 +39,7 @@ import {
 } from '@/lib/schedule-utils'
 import { useYouTubePlayer, YT_STATE } from '@/hooks/use-youtube-player'
 import { PreviousVideosModal } from './previous-videos-modal'
+import { useFullscreen } from '@/hooks/use-fullscreen'
 
 async function parseJsonSafely(response: Response) {
   const contentType = response.headers.get('content-type') || ''
@@ -819,7 +820,6 @@ export function SyncedVideoPlayer({
   const [volume, setVolume] = useState(75)
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [showTicker, setShowTicker] = useState(true)
-  const [isFullscreen, setIsFullscreen] = useState(false)
   const [showPreviousModal, setShowPreviousModal] = useState(false)
   const [previousVideos, setPreviousVideos] = useState<VideoProgram[]>([])
   const [showProgramOverlay, setShowProgramOverlay] = useState(false)
@@ -861,6 +861,9 @@ export function SyncedVideoPlayer({
   
   // Refs
   const playerRef = useRef<HTMLDivElement>(null)
+  // z-50: above the Donate button, below the page's modals (which render after
+  // the player at z-50) and the player's own modals (z-60+)
+  const { isFullscreen, fullscreenStyle, toggleFullscreen } = useFullscreen({ zIndex: 50 })
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const volumeHideTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const autoUnmuteTimerRef = useRef<NodeJS.Timeout | null>(null)
@@ -886,6 +889,13 @@ export function SyncedVideoPlayer({
   const playbackProgressWatchTimeRef = useRef(0)
   const playbackProgressWatchAtRef = useRef(0)
   const currentLoadAttemptRef = useRef(0)
+  // True while the Previous Programs player owns the screen and audio. The main
+  // player keeps running muted underneath; on iOS it barely progresses then, so
+  // the stall watchdog must stand down (it would unmute it and even reload it).
+  const previousPlayerActiveRef = useRef(false)
+  // The current load attempt's YouTube state handler — lets the startup
+  // progress checks run the PLAYING path when YouTube never reports it.
+  const onPlayerStateChangeRef = useRef<((state: number) => void) | null>(null)
   const channelLoadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const playEventsSinceLoadRef = useRef(0)
 
@@ -924,6 +934,7 @@ export function SyncedVideoPlayer({
     getDuration,
     setVolume: setYouTubeVolume,
     setMuted: setYouTubeMuted,
+    setMuteHold,
     seekTo,
     getCurrentTime,
     getIsMuted,
@@ -1272,6 +1283,9 @@ export function SyncedVideoPlayer({
 
   // ── Browser-side external API call (bypasses Cloudflare) ──
   const EXTERNAL_API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://api.deeniinfotech.com/api/tv-schedules'
+  // How long channel start/Refresh waits for the external API before playing
+  // from the fallback schedule (the request itself keeps going up to 2 min).
+  const STARTUP_API_WAIT_MS = 10000
 
   const fetchFromBrowserAPI = useCallback(async (channelId: string): Promise<any | null> => {
     try {
@@ -1422,7 +1436,7 @@ export function SyncedVideoPlayer({
   // Keep the ref in sync with the latest closure
   useEffect(() => { syncImmediateAfterTransitionRef.current = syncImmediateAfterTransition }, [syncImmediateAfterTransition])
 
-  const loadChannel = useCallback(async (channelId: string, options?: { preferUnmutedStart?: boolean; isRecoveryRetry?: boolean }) => {
+  const loadChannel = useCallback(async (channelId: string, options?: { preferUnmutedStart?: boolean; isRecoveryRetry?: boolean; prefetchedResult?: any }) => {
     const loadAttemptId = currentLoadAttemptRef.current + 1
     currentLoadAttemptRef.current = loadAttemptId
     const isStaleLoadAttempt = () => !mountedRef.current || currentLoadAttemptRef.current !== loadAttemptId
@@ -1432,44 +1446,53 @@ export function SyncedVideoPlayer({
     clearPlaybackStartWatchdog()
     clearChannelLoadTimeout()
 
-    channelLoadTimeoutRef.current = setTimeout(() => {
-      if (!mountedRef.current) return
-      if (currentLoadAttemptRef.current !== loadAttemptId) return
-      if (playerReadyRef.current || iframeVisibleRef.current) return
-
-      console.warn('⚠️ Channel load timeout: attempting one automatic recovery reload')
-
-      if (playbackRecoveryAttemptRef.current >= 1) {
-        startInProgressRef.current = false
-        setIsLoading(false)
-        setShowBrandedOverlay(false)
-        setApiError('Playback is taking longer than expected. Please tap Refresh.')
-        return
-      }
-
-      playbackRecoveryAttemptRef.current += 1
-      startInProgressRef.current = false
-      setIsLoading(false)
-      setShowStartScreen(false)
-      setShowBrandedOverlay(true)
-      setApiError(null)
-      setPlayerReady(false)
-      setIframeVisible(false)
-
-      try {
-        destroy()
-      } catch (_) {}
-
-      setTimeout(() => {
+    // Armed only once schedule data is in hand (below), so a slow API response
+    // doesn't count against the player-startup budget.
+    const armChannelLoadTimeout = () => {
+      clearChannelLoadTimeout()
+      channelLoadTimeoutRef.current = setTimeout(() => {
         if (!mountedRef.current) return
         if (currentLoadAttemptRef.current !== loadAttemptId) return
+        if (playerReadyRef.current || iframeVisibleRef.current) return
 
-        loadChannel(channelId, {
-          preferUnmutedStart: shouldStartUnmuted,
-          isRecoveryRetry: true,
-        })
-      }, 700)
-    }, 20000)
+        console.warn('⚠️ Channel load timeout: attempting one automatic recovery reload')
+
+        if (playbackRecoveryAttemptRef.current >= 1) {
+          startInProgressRef.current = false
+          setIsLoading(false)
+          setShowBrandedOverlay(false)
+          setApiError('Playback is taking longer than expected. Please tap Refresh.')
+          return
+        }
+
+        playbackRecoveryAttemptRef.current += 1
+        startInProgressRef.current = false
+        setIsLoading(false)
+        setShowStartScreen(false)
+        setShowBrandedOverlay(true)
+        setApiError(null)
+        setPlayerReady(false)
+        setIframeVisible(false)
+
+        // Keep the primed iOS player: destroying it loses the gesture-granted
+        // audio unlock and the retry would come back silent. The retry reuses it.
+        if (!(isIOS && isPrimedRef.current)) {
+          try {
+            destroy()
+          } catch (_) {}
+        }
+
+        setTimeout(() => {
+          if (!mountedRef.current) return
+          if (currentLoadAttemptRef.current !== loadAttemptId) return
+
+          loadChannel(channelId, {
+            preferUnmutedStart: shouldStartUnmuted,
+            isRecoveryRetry: true,
+          })
+        }, 700)
+      }, 20000)
+    }
 
     if (!options?.isRecoveryRetry) {
       playbackRecoveryAttemptRef.current = 0
@@ -1512,25 +1535,53 @@ export function SyncedVideoPlayer({
       
       const clientTime = Date.now()
 
-      // 1️⃣ Try external API directly from browser (bypasses Cloudflare)
-      let result = await fetchFromBrowserAPI(channelId)
+      // 1️⃣ Try external API directly from browser (bypasses Cloudflare).
+      // The API can take over a minute, so don't hold the loading screen for
+      // it: wait STARTUP_API_WAIT_MS, then start from the fallback schedule and
+      // switch to the API's program if it answers later with a different one
+      // (mid-session drift correction is disabled, so nothing else would).
+      let result = options?.prefetchedResult ?? null
+      if (!result) {
+        const apiPromise = fetchFromBrowserAPI(channelId)
+        const API_PENDING = Symbol('api-pending')
+        const raced = await Promise.race([
+          apiPromise,
+          new Promise<typeof API_PENDING>((resolve) => setTimeout(() => resolve(API_PENDING), STARTUP_API_WAIT_MS)),
+        ])
+        if (raced === API_PENDING) {
+          console.warn(`⏱️ External API slower than ${STARTUP_API_WAIT_MS / 1000}s — starting from fallback schedule`)
+          apiPromise.then((late) => {
+            if (!late?.currentProgram?.ytVideoId || isStaleLoadAttempt()) return
+            if (late.currentProgram.ytVideoId === lastVideoIdRef.current) return
+            console.log('📡 Late API response differs from fallback — switching to the live schedule')
+            loadChannel(channelId, { preferUnmutedStart: shouldStartUnmuted, prefetchedResult: late })
+          }).catch(() => {})
+        } else {
+          result = raced
+        }
+      }
 
       // 2️⃣ Fallback to our own Next.js API route (local schedule data)
       if (!result) {
         console.log('📋 Falling back to local /api/current-video route...')
-        const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 10000)
-        const response = await fetch(`/api/current-video?channel=${channelId}`, {
-          headers: { 
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache'
-          },
-          signal: controller.signal,
-        })
-        clearTimeout(timeoutId)
+        try {
+          const controller = new AbortController()
+          const timeoutId = setTimeout(() => controller.abort(), 10000)
+          const response = await fetch(`/api/current-video?channel=${channelId}`, {
+            headers: {
+              'Cache-Control': 'no-cache',
+              'Pragma': 'no-cache'
+            },
+            signal: controller.signal,
+          })
+          clearTimeout(timeoutId)
 
-        if (response.ok) {
-          result = await parseJsonSafely(response)
+          if (response.ok) {
+            result = await parseJsonSafely(response)
+          }
+        } catch (err) {
+          // Timed out / offline — fall through to the embedded schedule below
+          console.warn('⚠️ Local /api/current-video route failed:', err)
         }
       }
 
@@ -1545,6 +1596,8 @@ export function SyncedVideoPlayer({
       }
 
       if (isStaleLoadAttempt()) return
+
+      armChannelLoadTimeout()
 
       const offset = result.serverTime - clientTime
       setServerTimeOffset(offset)
@@ -1675,26 +1728,35 @@ export function SyncedVideoPlayer({
           setIsMuted(true)
         }
 
-        // Some iOS/Safari sessions play video but miss PLAYING callback.
-        // If time progresses, force-restore visuals to avoid black-screen hang.
+        // Some iOS/Safari sessions play video but miss (or get very late) the
+        // PLAYING callback — seen after Refresh. If time progresses, run the
+        // normal PLAYING handling ourselves: besides restoring visuals it also
+        // unmutes and unlocks the volume button; restoring visuals alone left
+        // the video playing silently with the volume locked.
+        // getCurrentTime() already reports the seek target right after seekTo(),
+        // even when stuck, so require the time to actually advance.
+        let lastProgressSample = -1
+        const isPlaybackAdvancing = () => {
+          const t = getCurrentTime()
+          const advancing = lastProgressSample >= 0 && t > lastProgressSample + 0.25
+          lastProgressSample = t
+          return advancing
+        }
         const recoverVisualPlaybackIfNeeded = () => {
           if (!mountedRef.current) return
           if (currentLoadAttemptRef.current !== loadAttemptId) return
-          if (iframeVisibleRef.current) return
+          if (playEventsSinceLoadRef.current > 0) return
 
-          const progress = getCurrentTime()
-          if (progress > 0.1) {
-            console.log('✅ Playback progress detected without PLAYING callback; restoring visuals')
-            setIframeVisible(true)
-            setIsLoading(false)
-            hideBrandedOverlayAfterDelay(3500)
-            clearPlaybackStartWatchdog()
-            playbackRecoveryAttemptRef.current = 0
+          if (isPlaybackAdvancing()) {
+            console.log('✅ Playback progress detected without PLAYING callback; treating as PLAYING')
+            onPlayerStateChangeRef.current?.(YT_STATE.PLAYING)
           }
         }
 
-        setTimeout(recoverVisualPlaybackIfNeeded, 1500)
+        setTimeout(recoverVisualPlaybackIfNeeded, 800)
+        setTimeout(recoverVisualPlaybackIfNeeded, 1800)
         setTimeout(recoverVisualPlaybackIfNeeded, 3200)
+        setTimeout(recoverVisualPlaybackIfNeeded, 6000)
 
         // Some Safari/iOS reloads miss PLAYING callbacks; watchdog recovers once.
         clearPlaybackStartWatchdog()
@@ -1703,14 +1765,9 @@ export function SyncedVideoPlayer({
           if (currentLoadAttemptRef.current !== loadAttemptId) return
           if (playerReadyRef.current && iframeVisibleRef.current) return
 
-          const progress = getCurrentTime()
-          if (progress > 0.1) {
-            console.log('✅ Watchdog found active playback; restoring visuals without reload')
-            setIframeVisible(true)
-            setIsLoading(false)
-            hideBrandedOverlayAfterDelay(3500)
-            playbackRecoveryAttemptRef.current = 0
-            clearPlaybackStartWatchdog()
+          if (isPlaybackAdvancing()) {
+            console.log('✅ Watchdog found active playback; treating as PLAYING without reload')
+            onPlayerStateChangeRef.current?.(YT_STATE.PLAYING)
             return
           }
 
@@ -1729,10 +1786,13 @@ export function SyncedVideoPlayer({
 
           playbackRecoveryAttemptRef.current += 1
 
-          // Hard reset stale iframe/API state before retrying the same channel.
-          try {
-            destroy()
-          } catch (_) {}
+          // Hard reset stale iframe/API state before retrying the same channel —
+          // except the primed iOS player, which holds the audio unlock.
+          if (!(isIOS && isPrimedRef.current)) {
+            try {
+              destroy()
+            } catch (_) {}
+          }
           setIframeVisible(false)
           setPlayerReady(false)
 
@@ -1861,6 +1921,8 @@ export function SyncedVideoPlayer({
           play()
         }
       }
+
+      onPlayerStateChangeRef.current = onPlayerStateChange
 
       const onDurationChange = (duration: number) => {
         if (duration && duration > 0) {
@@ -2408,32 +2470,6 @@ export function SyncedVideoPlayer({
     
   }, [currentChannelId, playerReady, currentProgram, loadVideo, play])
 
-  // Fullscreen handlers
-  const handleFullscreen = async () => {
-    if (!playerRef.current) return
-    
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen()
-        setIsFullscreen(false)
-      } else {
-        await playerRef.current.requestFullscreen()
-        setIsFullscreen(true)
-      }
-    } catch (err) {
-      console.error('Fullscreen error:', err)
-    }
-  }
-
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement)
-    }
-    
-    document.addEventListener('fullscreenchange', handleFullscreenChange)
-    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange)
-  }, [])
-
   // Time update interval - runs every 100ms for smooth display
   useEffect(() => {
     if (!playerReady || !currentProgram || isTransitioningRef.current) return
@@ -2458,6 +2494,25 @@ export function SyncedVideoPlayer({
       if (!mountedRef.current || isTransitioningRef.current) return
 
       const now = Date.now()
+
+      if (previousPlayerActiveRef.current) {
+        // Background mode: keep the live broadcast moving (so it can reach the
+        // end of a program and advance to the next one) but never unmute it or
+        // reload the channel while the Previous Programs player owns the audio.
+        const bgCurrent = getCurrentTime()
+        if (bgCurrent > playbackProgressWatchTimeRef.current + 0.35) {
+          playbackProgressWatchTimeRef.current = bgCurrent
+          playbackProgressWatchAtRef.current = now
+        } else if (now - playbackProgressWatchAtRef.current >= 8000) {
+          console.warn('⚠️ Background live stream stalled, nudging (stays muted)')
+          seekTo(Math.max(0, bgCurrent + 0.6), true)
+          play()
+          playbackProgressWatchAtRef.current = now
+        }
+        bufferingStartedAtRef.current = 0
+        bufferingRecoveryStepRef.current = 0
+        return
+      }
       const current = getCurrentTime()
       const duration = getDuration()
 
@@ -2734,15 +2789,25 @@ export function SyncedVideoPlayer({
 
   return (
     <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-screen w-full overflow-hidden" suppressHydrationWarning>
-      <div className={`relative w-full ${
-        isDesktop ? 'md:w-[70vw] md:max-w-[1400px]' :
-        isTablet ? 'w-[90vw]' :
-        'w-full'
-      }`}>
+      <div
+        style={fullscreenStyle}
+        className={
+          isFullscreen
+            ? 'relative flex flex-col overflow-hidden bg-black'
+            : `relative w-full ${
+                isDesktop ? 'md:w-[70vw] md:max-w-[1400px]' :
+                isTablet ? 'w-[90vw]' :
+                'w-full'
+              }`
+        }
+      >
         <div 
           ref={playerRef}
-          className={`relative w-full aspect-video bg-black/50 backdrop-blur-sm overflow-hidden shadow-2xl border border-white/10 border-b-0 transition-all duration-300 rounded-t-2xl md:rounded-t-3xl rounded-b-none
-          }`}
+          className={
+            isFullscreen
+              ? 'relative w-full flex-1 min-h-0 bg-black overflow-hidden'
+              : 'relative w-full aspect-video bg-black/50 backdrop-blur-sm overflow-hidden shadow-2xl border border-white/10 border-b-0 transition-all duration-300 rounded-t-2xl md:rounded-t-3xl rounded-b-none'
+          }
         >
           {/* YouTube iframe container — stays opacity:0 until the real video fires
               its first PLAYING event (iframeVisible).  This hides the primer video
@@ -3019,8 +3084,10 @@ export function SyncedVideoPlayer({
         </div>
 
         {/* Bottom Controls - OUTSIDE video frame - ALWAYS VISIBLE - Unified with iframe */}
-        <div className="w-full">
-          <div className="bg-black/60 backdrop-blur-xl border border-white/10 border-t-0 rounded-b-2xl md:rounded-b-3xl px-6 py-4">
+        <div className="w-full flex-shrink-0">
+          <div className={`bg-black/60 backdrop-blur-xl border-white/10 px-6 py-4 ${
+            isFullscreen ? 'border-t' : 'border border-t-0 rounded-b-2xl md:rounded-b-3xl'
+          }`}>
             <div className="flex items-center justify-between gap-2 md:gap-4">
                     {/* Logo Section - Replaces sound bar */}
               <div className="flex items-center gap-2 flex-shrink-0">
@@ -3032,7 +3099,7 @@ export function SyncedVideoPlayer({
               </div>
 
                     {/* Action Buttons - Order: Schedule, History, Channel, Refresh, Menu */}
-              <div className="flex items-center gap-1 md:gap-1.5">
+              <div className="flex items-center gap-0.5 sm:gap-1 md:gap-1.5">
 <div
   className="flex items-center"
   onMouseEnter={handleDesktopVolumeMouseEnter}
@@ -3085,6 +3152,7 @@ export function SyncedVideoPlayer({
                   { icon: History, onClick: () => setShowPreviousModal(true), title: 'Watched Program' },
                   { icon: Globe, onClick: () => handleOpenChannelSelector(), title: 'Channel' },
                   { icon: RefreshCw, onClick: handleReload, title: 'Refresh' },
+                  { icon: isFullscreen ? Minimize : Maximize, onClick: toggleFullscreen, title: isFullscreen ? 'Exit full screen' : 'Full screen' },
                   { icon: MoreHorizontal, onClick: onMenuOpen, title: 'Menu' },
                 ].map((item, index) => (
                   <motion.div
@@ -3130,15 +3198,37 @@ export function SyncedVideoPlayer({
         videos={previousVideos}
         onPlayVideo={handlePlayFromPrevious}
         currentChannelId={currentChannelId}
+        openFullscreen={isFullscreen}
         onPauseMainPlayer={() => {
-          // MUTE main player when watching from history (don't destroy)
+          // MUTE main player when watching from history (don't destroy). The
+          // hold keeps it muted even if buffering/stall recovery or a PLAYING
+          // event tries to unmute it while the previous program plays.
+          previousPlayerActiveRef.current = true
+          setMuteHold(true)
           setYouTubeMuted(true)
           setIsMuted(true)
         }}
         onResumeMainPlayer={() => {
-          // UNMUTE main player when history video closes
+          // UNMUTE main player when history video closes, and make sure it is
+          // still playing (iOS may pause the other video while this one plays;
+          // the periodic schedule sync corrects the position afterwards)
+          previousPlayerActiveRef.current = false
+          playbackProgressWatchTimeRef.current = getCurrentTime()
+          playbackProgressWatchAtRef.current = Date.now()
+          bufferingStartedAtRef.current = 0
+          bufferingRecoveryStepRef.current = 0
+          setMuteHold(false)
           setYouTubeMuted(false)
           setIsMuted(false)
+          play()
+          // iOS may still be handing playback back from the previous player —
+          // retry shortly so the live stream resumes right away, not seconds later.
+          for (const delay of [600, 1800]) {
+            setTimeout(() => {
+              if (!mountedRef.current || previousPlayerActiveRef.current) return
+              play()
+            }, delay)
+          }
           // Do NOT close the Previous Programs modal - it stays open
           // Do NOT reload or restart the live TV
         }}

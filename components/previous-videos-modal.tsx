@@ -263,7 +263,12 @@ const MAX_BUFFERING_WAIT_MS = 12000
 // Keep the branded loading screen up this long after playback starts so
 // YouTube's start overlay (title bar, "More videos") never shows.
 const REVEAL_AFTER_PLAYING_MS = 3500
-const REVEAL_MAX_WAIT_MS = 6000
+// Safety cap only — normally the reveal waits for time to actually advance
+// (a short cap revealed YouTube's own spinner on iOS)
+const REVEAL_MAX_WAIT_MS = 20000
+// Playback frozen this long (not paused by the user) → branded screen covers
+// YouTube's buffering spinner until it moves again
+const STALL_COVER_MS = 1200
 const CONTROLS_HIDE_MS = 3500
 const SKIP_SECONDS = 10
 
@@ -414,6 +419,9 @@ const PreviousVideoPlayer = ({
   // video is really moving — otherwise YouTube's own spinner/title screen (and,
   // on iOS, the previously cued video) shows through.
   const [iframeShown, setIframeShown] = useState(false)
+  const [isStalled, setIsStalled] = useState(false)
+  const lastTimeRef = useRef(0)
+  const lastMoveAtRef = useRef(0)
   const revealPendingRef = useRef(false)
   const playingSinceRef = useRef(0)
   const playStartTimeRef = useRef(0)
@@ -482,6 +490,7 @@ const PreviousVideoPlayer = ({
     setIsBuffering(false)
     setIsVideoLoading(true)
     setIframeShown(false)
+    setIsStalled(false)
     revealPendingRef.current = true
     playingSinceRef.current = 0
     setCurrentTime(0)
@@ -670,6 +679,27 @@ const PreviousVideoPlayer = ({
         const d = player.getDuration?.() ?? 0
         if (typeof t === 'number') setCurrentTime(t)
         if (typeof d === 'number' && d > 0) setDuration(d)
+
+        // Movement is the source of truth — iOS drops/delays state events.
+        const now = Date.now()
+        const state = player.getPlayerState?.()
+        if (typeof t === 'number' && t > lastTimeRef.current + 0.1) {
+          lastTimeRef.current = t
+          lastMoveAtRef.current = now
+          setIsStalled(false)
+          if (state !== YT_STATE.PAUSED && state !== YT_STATE.ENDED) {
+            setIsPlaying(true) // so auto-hide etc. work even without PLAYING
+            setIsBuffering(false)
+          }
+        } else {
+          if (typeof t === 'number' && t < lastTimeRef.current - 1) lastTimeRef.current = t // seek back / new video
+          const userStopped = state === YT_STATE.PAUSED || state === YT_STATE.ENDED || state === YT_STATE.CUED
+          if (!revealPendingRef.current && !userStopped && now - lastMoveAtRef.current > STALL_COVER_MS) {
+            setIsStalled(true)
+          } else if (userStopped) {
+            setIsStalled(false)
+          }
+        }
         // Reveal the iframe once playback is really moving AND YouTube's own
         // start-of-playback overlay (channel/title bar, "More videos", logo —
         // shown ~3s even with controls off) has faded; same as the main
@@ -786,6 +816,7 @@ const PreviousVideoPlayer = ({
     setNeedsTap(false)
     setIsVideoLoading(false)
     setIframeShown(false)
+    setIsStalled(false)
     revealPendingRef.current = false
     if (fsMode !== 'none') exitFullscreen()
     onClose()
@@ -1044,7 +1075,7 @@ const PreviousVideoPlayer = ({
           {/* Branded loading overlay — also the Tap to Play screen (same UI on
               iOS as web/Android; Tap to Play appears at most the first time) */}
           <BrandedLoadingOverlay
-            isVisible={isOpen && (isVideoLoading || needsTap)}
+            isVisible={isOpen && (isVideoLoading || needsTap || isStalled)}
             programName={title}
             onTap={needsTap ? handleTapToPlay : undefined}
           />

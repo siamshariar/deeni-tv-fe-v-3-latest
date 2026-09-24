@@ -831,6 +831,12 @@ export function SyncedVideoPlayer({
   // Branded loading overlay state - event-based, not timer-based
   const [showBrandedOverlay, setShowBrandedOverlay] = useState(false)
   const brandedOverlayProgramRef = useRef<string>('')
+  // Last time the broadcast's playback time was seen advancing, and whether
+  // the branded overlay is currently up because playback is stalled. iOS
+  // reports PLAYING while YouTube is still showing its own spinner — the
+  // branded screen must cover that instead of revealing it.
+  const lastMoveAtRef = useRef(0)
+  const stallCoverRef = useRef(false)
   // iframeVisible — keeps the iframe container at opacity:0 until the REAL video
   // fires its first PLAYING event.  Prevents the primer (zoo) video from flashing
   // on screen.  Once true it stays true; subsequent transitions are hidden by
@@ -1016,6 +1022,12 @@ export function SyncedVideoPlayer({
     clearBrandedOverlayHideTimeout()
     brandedOverlayHideTimeoutRef.current = setTimeout(() => {
       if (!mountedRef.current) return
+      // Not actually moving yet (YouTube still spinning) — keep the branded
+      // screen; the stall watcher hides it once time advances.
+      if (Date.now() - lastMoveAtRef.current > 1000) {
+        stallCoverRef.current = true
+        return
+      }
       setShowBrandedOverlay(false)
     }, delayMs)
   }, [clearBrandedOverlayHideTimeout])
@@ -2498,6 +2510,38 @@ export function SyncedVideoPlayer({
       }
     }
   }, [playerReady, currentProgram, updateTimeDisplay, isTransitioningRef.current])
+
+  // Cover YouTube's own loading spinner with the branded screen whenever the
+  // broadcast isn't actually moving (start-up on iOS, mid-play buffering), and
+  // take it away as soon as time advances again.
+  useEffect(() => {
+    if (!playerReady || isLoading || showStartScreen || !!apiError) return
+    let lastT = getCurrentTime()
+    lastMoveAtRef.current = Date.now()
+    const watcher = setInterval(() => {
+      if (!mountedRef.current) return
+      const t = getCurrentTime()
+      const now = Date.now()
+      if (t > lastT + 0.15) {
+        lastT = t
+        lastMoveAtRef.current = now
+        if (stallCoverRef.current) {
+          stallCoverRef.current = false
+          setShowBrandedOverlay(false)
+        }
+        return
+      }
+      if (t < lastT - 1) lastT = t // new video / seek back
+      if (isTransitioningRef.current || stallCoverRef.current) return
+      if (now - lastMoveAtRef.current > 1200 && iframeVisibleRef.current) {
+        stallCoverRef.current = true
+        clearBrandedOverlayHideTimeout()
+        brandedOverlayProgramRef.current = currentProgramRef.current?.title || brandedOverlayProgramRef.current
+        setShowBrandedOverlay(true)
+      }
+    }, 300)
+    return () => clearInterval(watcher)
+  }, [playerReady, isLoading, showStartScreen, apiError, getCurrentTime, clearBrandedOverlayHideTimeout])
 
   // Recover from silent iOS/WebKit stalls by forcing resume when progress freezes.
   useEffect(() => {

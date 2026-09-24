@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { lockPageScroll } from '@/lib/player-layout'
 
 export type FullscreenMode = 'none' | 'native' | 'pseudo'
 
@@ -85,6 +86,13 @@ export function useFullscreen({ zIndex }: { zIndex: number }) {
       document.removeEventListener('webkitfullscreenchange', onChange)
     }
   }, [])
+
+  // No page scrolling behind a fullscreen player (iOS would otherwise let the
+  // page move under the pinned wrapper)
+  useEffect(() => {
+    if (fsMode === 'none') return
+    return lockPageScroll()
+  }, [fsMode])
 
   // Esc leaves pseudo fullscreen too (native handles its own Esc)
   useEffect(() => {

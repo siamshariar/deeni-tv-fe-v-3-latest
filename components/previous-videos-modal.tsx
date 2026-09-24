@@ -9,6 +9,7 @@ import { formatDuration } from '@/lib/schedule-utils'
 import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useFullscreen } from '@/hooks/use-fullscreen'
+import { playerFrameStyle, lockPageScroll } from '@/lib/player-layout'
 
 interface PreviousVideosModalProps {
   isOpen: boolean
@@ -236,6 +237,10 @@ const PLAY_WATCHDOG_MS = 4000
 // A player that keeps reporting BUFFERING without ever playing gets Tap to Play
 // after this long instead of an endless loading screen.
 const MAX_BUFFERING_WAIT_MS = 12000
+// Keep the branded loading screen up this long after playback starts so
+// YouTube's start overlay (title bar, "More videos") never shows.
+const REVEAL_AFTER_PLAYING_MS = 3500
+const REVEAL_MAX_WAIT_MS = 6000
 const CONTROLS_HIDE_MS = 3000
 const SKIP_SECONDS = 10
 
@@ -382,6 +387,13 @@ const PreviousVideoPlayer = ({
   const [isVideoLoading, setIsVideoLoading] = useState(false)
   const [needsTap, setNeedsTap] = useState(false)
   const [isEnded, setIsEnded] = useState(false)
+  // The iframe stays invisible (branded loading screen on top) until the new
+  // video is really moving — otherwise YouTube's own spinner/title screen (and,
+  // on iOS, the previously cued video) shows through.
+  const [iframeShown, setIframeShown] = useState(false)
+  const revealPendingRef = useRef(false)
+  const playingSinceRef = useRef(0)
+  const playStartTimeRef = useRef(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(75)
@@ -392,6 +404,13 @@ const PreviousVideoPlayer = ({
 
   useEffect(() => {
     isOpenRef.current = isOpen
+  }, [isOpen])
+
+  // No page scrolling behind the player (iOS let the page — and the main
+  // player's iframe — scroll into view underneath)
+  useEffect(() => {
+    if (!isOpen) return
+    return lockPageScroll()
   }, [isOpen])
 
   const clearWatchdog = useCallback(() => {
@@ -439,6 +458,9 @@ const PreviousVideoPlayer = ({
     setIsPlaying(false)
     setIsBuffering(false)
     setIsVideoLoading(true)
+    setIframeShown(false)
+    revealPendingRef.current = true
+    playingSinceRef.current = 0
     setCurrentTime(0)
     setDuration(0)
     try {
@@ -510,10 +532,16 @@ const PreviousVideoPlayer = ({
                 }
                 setIsPlaying(true)
                 setIsBuffering(false)
-                setIsVideoLoading(false)
                 setNeedsTap(false)
                 setIsEnded(false)
                 bumpControls()
+                // YouTube (iOS especially) reports PLAYING while still showing
+                // its own spinner — reveal only once time actually advances
+                // (see the polling effect), with a time cap as a fallback.
+                if (revealPendingRef.current && !playingSinceRef.current) {
+                  playingSinceRef.current = Date.now()
+                  try { playStartTimeRef.current = event.target.getCurrentTime() || 0 } catch {}
+                }
                 try {
                   const d = event.target.getDuration()
                   if (typeof d === 'number' && d > 0) setDuration(d)
@@ -537,7 +565,9 @@ const PreviousVideoPlayer = ({
           onError: () => {
             if (unmountedRef.current) return
             clearWatchdog()
+            revealPendingRef.current = false
             setIsVideoLoading(false)
+            setIframeShown(true)
             setIsBuffering(false)
           },
         },
@@ -597,6 +627,7 @@ const PreviousVideoPlayer = ({
       } else {
         pendingVideoIdRef.current = v.videoId
         setIsVideoLoading(true)
+        setIframeShown(false)
         ensurePlayer(v.videoId)
       }
     },
@@ -613,6 +644,19 @@ const PreviousVideoPlayer = ({
         const d = player.getDuration?.() ?? 0
         if (typeof t === 'number') setCurrentTime(t)
         if (typeof d === 'number' && d > 0) setDuration(d)
+        // Reveal the iframe once playback is really moving AND YouTube's own
+        // start-of-playback overlay (channel/title bar, "More videos", logo —
+        // shown ~3s even with controls off) has faded; same as the main
+        // player's 3.5s branded-overlay delay. Hard cap as a fallback.
+        if (revealPendingRef.current && playingSinceRef.current) {
+          const moving = typeof t === 'number' && t > playStartTimeRef.current + 0.3
+          const playingFor = Date.now() - playingSinceRef.current
+          if ((moving && playingFor >= REVEAL_AFTER_PLAYING_MS) || playingFor > REVEAL_MAX_WAIT_MS) {
+            revealPendingRef.current = false
+            setIsVideoLoading(false)
+            setIframeShown(true)
+          }
+        }
       } catch {}
     }, 250)
     return () => clearInterval(interval)
@@ -659,6 +703,8 @@ const PreviousVideoPlayer = ({
     } catch {}
     setNeedsTap(false)
     setIsVideoLoading(true)
+    revealPendingRef.current = true
+    playingSinceRef.current = 0
     armWatchdog()
   }, [armWatchdog])
 
@@ -713,6 +759,8 @@ const PreviousVideoPlayer = ({
     setIsPlaying(false)
     setNeedsTap(false)
     setIsVideoLoading(false)
+    setIframeShown(false)
+    revealPendingRef.current = false
     if (fsMode !== 'none') exitFullscreen()
     onClose()
   }, [clearWatchdog, exitFullscreen, fsMode, onClose])
@@ -902,12 +950,12 @@ const PreviousVideoPlayer = ({
       }`}
     >
       <div
-        style={fullscreenStyle}
+        style={fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')}
         onMouseMove={() => { if (!isCoarsePointer) bumpControls() }}
         className={
           isFullscreen
             ? `relative overflow-hidden bg-black ${controlsShown ? '' : 'cursor-none'}`
-            : `relative ${isDesktop ? 'w-[70vw] max-w-[1400px]' : isTablet ? 'w-[90vw]' : 'w-full'}`
+            : 'relative'
         }
       >
         {/* Video area — same frame as the main player */}
@@ -919,7 +967,22 @@ const PreviousVideoPlayer = ({
           }
         >
           {/* Persistent YT.Player mounts here — never cleared on close */}
-          <div ref={containerRef} className="absolute inset-0 w-full h-full" />
+          <div
+            ref={containerRef}
+            className="absolute inset-0 w-full h-full"
+            style={{ opacity: iframeShown ? 1 : 0 }}
+          />
+
+          {/* Cover YouTube's own paused / end screens (title bar, "More videos",
+              suggestions) with the program thumbnail */}
+          {iframeShown && !isPlaying && !isBuffering && !needsTap && video && (
+            <div
+              className="absolute inset-0 z-10 bg-black bg-cover bg-center"
+              style={{ backgroundImage: `url(https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg)` }}
+            >
+              <div className="absolute inset-0 bg-black/55" />
+            </div>
+          )}
 
           {/* Tap surface */}
           <button

@@ -40,6 +40,7 @@ import {
 import { useYouTubePlayer, YT_STATE } from '@/hooks/use-youtube-player'
 import { PreviousVideosModal } from './previous-videos-modal'
 import { useFullscreen } from '@/hooks/use-fullscreen'
+import { playerFrameStyle } from '@/lib/player-layout'
 
 async function parseJsonSafely(response: Response) {
   const contentType = response.headers.get('content-type') || ''
@@ -2788,18 +2789,10 @@ export function SyncedVideoPlayer({
   const isLastInCycle = currentProgram && cycleInfo.total ? cycleInfo.current === cycleInfo.total : false
 
   return (
-    <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-screen w-full overflow-hidden" suppressHydrationWarning>
+    <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-dvh w-full overflow-hidden" suppressHydrationWarning>
       <div
-        style={fullscreenStyle}
-        className={
-          isFullscreen
-            ? 'relative flex flex-col overflow-hidden bg-black'
-            : `relative w-full ${
-                isDesktop ? 'md:w-[70vw] md:max-w-[1400px]' :
-                isTablet ? 'w-[90vw]' :
-                'w-full'
-              }`
-        }
+        style={fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')}
+        className={isFullscreen ? 'relative flex flex-col overflow-hidden bg-black' : 'relative'}
       >
         <div 
           ref={playerRef}

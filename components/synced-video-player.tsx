@@ -935,6 +935,9 @@ export function SyncedVideoPlayer({
   const isMobile = useMediaQuery('(max-width: 768px)')
   const isTablet = useMediaQuery('(min-width: 769px) and (max-width: 1024px)')
   const isDesktop = useMediaQuery('(min-width: 1025px)')
+  // Touch screens: taps also fire a synthetic mousemove. Reacting to it on iOS
+  // (content change in a mouse handler) can make Safari swallow the tap's click.
+  const isCoarsePointer = useMediaQuery('(pointer: coarse)')
   const lastVideoIdRef = useRef<string>('')
   const syncIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const mountedRef = useRef(true)
@@ -2880,10 +2883,17 @@ export function SyncedVideoPlayer({
   return (
     <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-dvh w-full overflow-hidden" suppressHydrationWarning>
       <div
-        style={fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')}
+        style={{
+          ...(fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')),
+          // Previous Programs player open → the whole main player (frame, bar,
+          // timer) is hidden underneath, not just its iframe. Opacity (not
+          // display/visibility) so the muted live stream keeps playing.
+          ...(previousPlayerOpen ? { opacity: 0, pointerEvents: 'none' as const } : null),
+        }}
+        aria-hidden={previousPlayerOpen || undefined}
         className={isFullscreen ? `relative overflow-hidden bg-black ${fsControlsVisible ? '' : 'cursor-none'}` : 'relative'}
         onPointerDown={isFullscreen ? bumpFsControls : undefined}
-        onMouseMove={isFullscreen ? bumpFsControls : undefined}
+        onMouseMove={isFullscreen && !isCoarsePointer ? bumpFsControls : undefined}
       >
         <div 
           ref={playerRef}
@@ -3343,9 +3353,16 @@ export function SyncedVideoPlayer({
           // iOS may still be handing playback/audio back from the previous
           // player and silently drop the first play/unmute — re-apply both
           // shortly so the live stream is audible right away, not seconds later.
+          // If it stalled in the background (iPhones throttle a second video),
+          // play() alone does nothing — nudge the position so it re-buffers
+          // right away instead of waiting ~6s for the stall watchdog.
+          let lastT = getCurrentTime()
           for (const delay of [600, 1800, 3500]) {
             setTimeout(() => {
               if (!mountedRef.current || previousPlayerActiveRef.current) return
+              const t = getCurrentTime()
+              if (delay > 600 && t <= lastT + 0.2) seekTo(t + 0.25, true)
+              lastT = t
               play()
               setYouTubeMuted(false)
               setYouTubeVolume(volume)

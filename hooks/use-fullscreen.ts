@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
-import { lockPageScroll } from '@/lib/player-layout'
+import { lockPageScroll, holdRotatedApp } from '@/lib/player-layout'
 
 export type FullscreenMode = 'none' | 'native' | 'pseudo'
 
@@ -19,7 +19,9 @@ const getFullscreenElement = (): Element | null =>
 //
 // iPhone Safari has no page fullscreen at all, so there (or whenever the native
 // request fails, e.g. some WebViews) we fall back to a CSS "pseudo" fullscreen:
-// the same pinned wrapper, rotated 90° to landscape while the phone is portrait.
+// the same pinned wrapper. While the phone is portrait the whole app root is
+// rotated 90° to landscape (holdRotatedApp) — not just the player — so modals
+// opened from fullscreen share the player's orientation.
 export function useFullscreen({ zIndex }: { zIndex: number }) {
   const [fsMode, setFsMode] = useState<FullscreenMode>('none')
   const isPortrait = useMediaQuery('(orientation: portrait)')
@@ -104,20 +106,21 @@ export function useFullscreen({ zIndex }: { zIndex: number }) {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [fsMode])
 
-  // In rotated mode the element's horizontal axis runs down the screen —
-  // anything measuring pointer position along it must use clientY.
+  // In rotated mode the app's horizontal axis runs down the screen — anything
+  // measuring pointer position along it must use clientY.
   const rotated = fsMode === 'pseudo' && isPortrait
 
-  // Apply to the player wrapper element
+  useEffect(() => {
+    if (!rotated) return
+    return holdRotatedApp()
+  }, [rotated])
+
+  // Apply to the player wrapper element. When rotated, the app root is the
+  // (transformed) containing block, so "fixed, full size" fills the landscape root.
   const fullscreenStyle: CSSProperties | undefined = fsMode === 'none'
     ? undefined
     : rotated
-      ? {
-          position: 'fixed', top: 0, left: 0, zIndex,
-          width: '100dvh', height: '100dvw',
-          transform: 'translateX(100dvw) rotate(90deg)',
-          transformOrigin: 'top left',
-        }
+      ? { position: 'fixed', inset: 0, zIndex, width: '100%', height: '100%' }
       : { position: 'fixed', inset: 0, zIndex, width: '100%', height: '100dvh' }
 
   return {

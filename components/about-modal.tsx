@@ -35,7 +35,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
             className="fixed inset-0 z-[51] flex items-center justify-center p-4"
             onClick={onClose}
           >
-            <div className="w-full max-w-2xl max-h-[88vh] overflow-y-auto backdrop-blur-xl bg-gradient-to-br from-zinc-900/95 via-zinc-900/90 to-zinc-950/95 border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="w-full max-w-2xl max-h-[calc(var(--app-vh)*88)] overflow-y-auto backdrop-blur-xl bg-gradient-to-br from-zinc-900/95 via-zinc-900/90 to-zinc-950/95 border border-white/10 rounded-2xl p-6 md:p-8 shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex justify-between items-start mb-2 md:mb-4">
                 <div className="flex items-center gap-4">
                   <img 

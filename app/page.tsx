@@ -158,7 +158,7 @@ export default function Home() {
   }, [])
 
   if (!isMounted) {
-    return <main className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning />
+    return <main id="app-root" className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning />
   }
 
   const handleCloseChannelSelector = () => {
@@ -170,7 +170,7 @@ export default function Home() {
   }
 
   return (
-    <main className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning>
+    <main id="app-root" className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning>
       {/* Logo Header - Commented out per requirements */}
       {/* <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-50 flex items-center">
         <img 
@@ -199,6 +199,7 @@ export default function Home() {
         onReloadStart={handleReloadStart}
         triggerReload={reloadCounter}
         hasUserSelectedChannel={!!activeChannelId}
+        isOverlayOpen={isMenuOpen || isChannelSelectorOpen || activeModal !== null}
       />
       
       {/* Menu Drawer - Slides from bottom */}

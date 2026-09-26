@@ -218,3 +218,33 @@
     padding-right: env(safe-area-inset-right);
   }
 }
+/* ── Player viewport height unit ──────────────────────────────────────────
+   1% of the visible app height. While the iPhone rotated fullscreen is active
+   the whole app is turned 90° (see below), so the app's height is then the
+   screen's width. Use calc(var(--app-vh) * N) instead of Nvh in modals/players. */
+:root {
+  --app-vh: 1dvh;
+}
+html[data-rotated-fs] {
+  --app-vh: 1dvw;
+}
+
+/* ── iPhone rotated fullscreen ───────────────────────────────────────────
+   iPhone Safari has no element fullscreen, so fullscreen is a CSS layout
+   rotated to landscape. The whole app root rotates (not just the player) so
+   every modal opened from fullscreen — schedule, menu, channels, previous
+   programs — appears in the same landscape orientation as the player. */
+html[data-rotated-fs] #app-root {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100dvh;
+  height: 100dvw;
+  min-height: 0;
+  transform: translateX(100dvw) rotate(90deg);
+  transform-origin: top left;
+  overflow: hidden;
+}
+html[data-rotated-fs] #app-root .min-h-dvh {
+  min-height: 100%;
+}

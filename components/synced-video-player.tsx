@@ -82,6 +82,8 @@ interface SyncedVideoPlayerProps {
   onProgramChange?: (currentProgramId: string, schedule: VideoProgram[]) => void
   /** Increment this counter to trigger a channel reload (e.g. from the Reload menu option) */
   triggerReload?: number
+  // A page-level modal/drawer (schedule, menu, about, channels) is open
+  isOverlayOpen?: boolean
 }
 
 // Channel Selector Modal Component
@@ -146,7 +148,7 @@ const ChannelSelectorModal = ({
               </div>
             </div>
             
-            <div className="p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="p-4 max-h-[calc(var(--app-vh)*60)] overflow-y-auto custom-scrollbar">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {filteredChannels.map((channel, index) => (
                   <motion.button
@@ -787,7 +789,8 @@ export function SyncedVideoPlayer({
   onReloadStart,
   onProgramChange,
   triggerReload = 0,
-  hasUserSelectedChannel = true
+  hasUserSelectedChannel = true,
+  isOverlayOpen = false,
 }: SyncedVideoPlayerProps) {
   const [isIOS, setIsIOS] = useState(false)
   const [isAndroid, setIsAndroid] = useState(false)
@@ -836,6 +839,14 @@ export function SyncedVideoPlayer({
   // reports PLAYING while YouTube is still showing its own spinner — the
   // branded screen must cover that instead of revealing it.
   const lastMoveAtRef = useRef(0)
+  // Since when playback has been moving continuously (0 = not moving), and how
+  // long it must have moved before a stall cover may go away: ~3s at a video
+  // start (YouTube shows its own title bar for ~3s after playback begins),
+  // short after a mid-play stall.
+  const movingSinceRef = useRef(0)
+  const stallCoverNeedMsRef = useRef(3000)
+  // Previous Programs player open → the main iframe is hidden (see render)
+  const [previousPlayerOpen, setPreviousPlayerOpen] = useState(false)
   const stallCoverRef = useRef(false)
   // iframeVisible — keeps the iframe container at opacity:0 until the REAL video
   // fires its first PLAYING event.  Prevents the primer (zoo) video from flashing
@@ -1022,10 +1033,13 @@ export function SyncedVideoPlayer({
     clearBrandedOverlayHideTimeout()
     brandedOverlayHideTimeoutRef.current = setTimeout(() => {
       if (!mountedRef.current) return
-      // Not actually moving yet (YouTube still spinning) — keep the branded
-      // screen; the stall watcher hides it once time advances.
-      if (Date.now() - lastMoveAtRef.current > 1000) {
+      // Not moving yet, or only just started (YouTube still spinning or
+      // showing its start title bar) — keep the branded screen; the stall
+      // watcher hides it after ~3s of real movement.
+      const movedFor = movingSinceRef.current ? Date.now() - movingSinceRef.current : 0
+      if (movedFor < 3000) {
         stallCoverRef.current = true
+        stallCoverNeedMsRef.current = 3000
         return
       }
       setShowBrandedOverlay(false)
@@ -2525,16 +2539,22 @@ export function SyncedVideoPlayer({
       if (t > lastT + 0.15) {
         lastT = t
         lastMoveAtRef.current = now
-        if (stallCoverRef.current) {
+        if (!movingSinceRef.current) movingSinceRef.current = now
+        if (stallCoverRef.current && now - movingSinceRef.current >= stallCoverNeedMsRef.current) {
           stallCoverRef.current = false
           setShowBrandedOverlay(false)
         }
         return
       }
-      if (t < lastT - 1) lastT = t // new video / seek back
+      if (t < lastT - 1) { // new video / seek back — its start counts afresh
+        lastT = t
+        movingSinceRef.current = 0
+      }
+      if (now - lastMoveAtRef.current > 1200) movingSinceRef.current = 0
       if (isTransitioningRef.current || stallCoverRef.current) return
       if (now - lastMoveAtRef.current > 1200 && iframeVisibleRef.current) {
         stallCoverRef.current = true
+        stallCoverNeedMsRef.current = 600
         clearBrandedOverlayHideTimeout()
         brandedOverlayProgramRef.current = currentProgramRef.current?.title || brandedOverlayProgramRef.current
         setShowBrandedOverlay(true)
@@ -2868,7 +2888,12 @@ export function SyncedVideoPlayer({
           <div
             ref={youtubeContainerRef}
             className="absolute inset-0 w-full h-full"
-            style={{ opacity: iframeVisible ? 1 : 0 }}
+            style={{
+              // Hidden while the previous player is open (it covers the main
+              // one; on iOS the video layer could otherwise paint through), and
+              // on iOS while any modal is open for the same reason.
+              opacity: iframeVisible && !previousPlayerOpen && !(isIOS && (isOverlayOpen || showChannelSelector || showPreviousModal)) ? 1 : 0,
+            }}
           />
           <div className="absolute inset-0 w-full h-full pointer-events-auto" />
           
@@ -3141,6 +3166,27 @@ export function SyncedVideoPlayer({
             ? `absolute inset-x-0 bottom-0 z-40 transition-opacity duration-300 ${fsControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
             : 'w-full'
         }>
+          {/* Fullscreen: program title + time + progress above the bar (same as
+              the previous player); shown/hidden together with the bar */}
+          {isFullscreen && currentProgram && (
+            <div className="px-3 sm:px-6 pt-10 pb-2 bg-gradient-to-t from-black/85 via-black/50 to-transparent">
+              <div className="mb-1.5 flex items-end justify-between gap-3">
+                <h3 className={`min-w-0 truncate font-semibold text-white drop-shadow-md ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
+                  {currentProgram.title}
+                </h3>
+                <span className={`flex-shrink-0 font-mono tabular-nums text-white/80 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
+                  {displayTime} / {formatTime(videoDuration)}
+                </span>
+              </div>
+              {/* Live broadcast: progress is shown, not seekable */}
+              <div className="relative h-1 w-full rounded-full bg-white/30">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-red-600"
+                  style={{ width: `${videoDuration > 0 ? Math.min(100, (currentTime / videoDuration) * 100) : 0}%` }}
+                />
+              </div>
+            </div>
+          )}
           <div className={`bg-black/60 backdrop-blur-xl border-white/10 px-3 py-3 sm:px-6 sm:py-4 ${
             isFullscreen ? 'border-t' : 'border border-t-0 rounded-b-2xl md:rounded-b-3xl'
           }`}>
@@ -3261,6 +3307,7 @@ export function SyncedVideoPlayer({
           // hold keeps it muted even if buffering/stall recovery or a PLAYING
           // event tries to unmute it while the previous program plays.
           previousPlayerActiveRef.current = true
+          setPreviousPlayerOpen(true)
           setMuteHold(true)
           setYouTubeMuted(true)
           setIsMuted(true)
@@ -3270,6 +3317,7 @@ export function SyncedVideoPlayer({
           // still playing (iOS may pause the other video while this one plays;
           // the periodic schedule sync corrects the position afterwards)
           previousPlayerActiveRef.current = false
+          setPreviousPlayerOpen(false)
           playbackProgressWatchTimeRef.current = getCurrentTime()
           playbackProgressWatchAtRef.current = Date.now()
           bufferingStartedAtRef.current = 0

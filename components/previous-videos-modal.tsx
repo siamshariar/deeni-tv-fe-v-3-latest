@@ -262,7 +262,7 @@ const PLAY_WATCHDOG_MS = 4000
 const MAX_BUFFERING_WAIT_MS = 12000
 // Keep the branded loading screen up this long after playback starts so
 // YouTube's start overlay (title bar, "More videos") never shows.
-const REVEAL_AFTER_PLAYING_MS = 3500
+const REVEAL_AFTER_PLAYING_MS = 3000
 // Safety cap only — normally the reveal waits for time to actually advance
 // (a short cap revealed YouTube's own spinner on iOS)
 const REVEAL_MAX_WAIT_MS = 20000
@@ -422,9 +422,10 @@ const PreviousVideoPlayer = ({
   const [isStalled, setIsStalled] = useState(false)
   const lastTimeRef = useRef(0)
   const lastMoveAtRef = useRef(0)
+  // Since when time has been advancing continuously (0 = not moving)
+  const movingSinceRef = useRef(0)
   const revealPendingRef = useRef(false)
   const playingSinceRef = useRef(0)
-  const playStartTimeRef = useRef(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(75)
@@ -493,6 +494,7 @@ const PreviousVideoPlayer = ({
     setIsStalled(false)
     revealPendingRef.current = true
     playingSinceRef.current = 0
+    movingSinceRef.current = 0
     setCurrentTime(0)
     setDuration(0)
     try {
@@ -575,7 +577,6 @@ const PreviousVideoPlayer = ({
                 // (see the polling effect), with a time cap as a fallback.
                 if (revealPendingRef.current && !playingSinceRef.current) {
                   playingSinceRef.current = Date.now()
-                  try { playStartTimeRef.current = event.target.getCurrentTime() || 0 } catch {}
                 }
                 try {
                   const d = event.target.getDuration()
@@ -686,13 +687,18 @@ const PreviousVideoPlayer = ({
         if (typeof t === 'number' && t > lastTimeRef.current + 0.1) {
           lastTimeRef.current = t
           lastMoveAtRef.current = now
+          if (!movingSinceRef.current) movingSinceRef.current = now
           setIsStalled(false)
           if (state !== YT_STATE.PAUSED && state !== YT_STATE.ENDED) {
             setIsPlaying(true) // so auto-hide etc. work even without PLAYING
             setIsBuffering(false)
           }
         } else {
-          if (typeof t === 'number' && t < lastTimeRef.current - 1) lastTimeRef.current = t // seek back / new video
+          if (typeof t === 'number' && t < lastTimeRef.current - 1) { // seek back / new video
+            lastTimeRef.current = t
+            movingSinceRef.current = 0
+          }
+          if (now - lastMoveAtRef.current > STALL_COVER_MS) movingSinceRef.current = 0
           const userStopped = state === YT_STATE.PAUSED || state === YT_STATE.ENDED || state === YT_STATE.CUED
           if (!revealPendingRef.current && !userStopped && now - lastMoveAtRef.current > STALL_COVER_MS) {
             setIsStalled(true)
@@ -700,14 +706,15 @@ const PreviousVideoPlayer = ({
             setIsStalled(false)
           }
         }
-        // Reveal the iframe once playback is really moving AND YouTube's own
-        // start-of-playback overlay (channel/title bar, "More videos", logo —
-        // shown ~3s even with controls off) has faded; same as the main
-        // player's 3.5s branded-overlay delay. Hard cap as a fallback.
+        // Reveal the iframe once playback has really been MOVING for ~3s, so
+        // YouTube's own start-of-playback overlay (channel/title bar, "More
+        // videos", logo — shown ~3s even with controls off) has faded. Counted
+        // from real movement, not the PLAYING event (iOS fires that early).
+        // Hard cap as a fallback.
         if (revealPendingRef.current && playingSinceRef.current) {
-          const moving = typeof t === 'number' && t > playStartTimeRef.current + 0.3
-          const playingFor = Date.now() - playingSinceRef.current
-          if ((moving && playingFor >= REVEAL_AFTER_PLAYING_MS) || playingFor > REVEAL_MAX_WAIT_MS) {
+          const movedFor = movingSinceRef.current ? now - movingSinceRef.current : 0
+          const playingFor = now - playingSinceRef.current
+          if (movedFor >= REVEAL_AFTER_PLAYING_MS || playingFor > REVEAL_MAX_WAIT_MS) {
             revealPendingRef.current = false
             setIsVideoLoading(false)
             setIframeShown(true)
@@ -825,19 +832,15 @@ const PreviousVideoPlayer = ({
   // Tap on the video: touch devices show/hide controls, mouse toggles play.
   const handleSurfaceClick = useCallback(() => {
     if (needsTap || isVideoLoading) return
-    const shown = controlsVisible || !isPlaying
+    // Touch: a tap always shows the title/progress/logo/controls for
+    // CONTROLS_HIDE_MS (then they auto-hide) — it never hides them instantly.
     if (isCoarsePointer) {
-      if (shown && isPlaying) {
-        if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current)
-        setControlsVisible(false)
-      } else {
-        bumpControls()
-      }
+      bumpControls()
       return
     }
     togglePlayback()
     bumpControls()
-  }, [bumpControls, controlsVisible, isCoarsePointer, isPlaying, isVideoLoading, needsTap, togglePlayback])
+  }, [bumpControls, isCoarsePointer, isVideoLoading, needsTap, togglePlayback])
 
   // Keyboard shortcuts (desktop)
   useEffect(() => {
@@ -1162,7 +1165,7 @@ export function PreviousVideosModal({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ duration: 0.2 }}
-              className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-h-[80vh] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-[70] overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
+              className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-h-[calc(var(--app-vh)*80)] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-[70] overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
             >
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-white/10">
@@ -1192,7 +1195,7 @@ export function PreviousVideosModal({
               </div>
 
               {/* Videos List - Simplified UI */}
-              <div className="overflow-y-auto max-h-[calc(80vh-80px)] p-4">
+              <div className="overflow-y-auto max-h-[calc(var(--app-vh)*80-80px)] p-4">
                 {videos.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-12 px-4">
                     <History className="h-8 w-8 text-white/20 mb-4" />

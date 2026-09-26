@@ -106,7 +106,7 @@ export function ChannelSelector({
             </div>
 
             {/* Channel grid */}
-            <div className="p-4 max-h-[60vh] overflow-y-auto custom-scrollbar">
+            <div className="p-4 max-h-[calc(var(--app-vh)*60)] overflow-y-auto custom-scrollbar">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {filtered.map((channel, index) => (
                   <motion.button

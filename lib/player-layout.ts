@@ -19,7 +19,9 @@ export function playerFrameStyle(size: PlayerSize): CSSProperties {
     size === 'desktop' ? 'min(70vw, 1400px)' :
     size === 'tablet' ? '90vw' :
     '100%'
-  return { width: `min(${base}, calc((100dvh - ${BAR_RESERVE_PX}px) * 16 / 9))` }
+  // --app-vh (globals.css) is 1dvh, or 1dvw while the app is rotated for the
+  // iPhone fullscreen — so the fit is always against the app's visible height.
+  return { width: `min(${base}, calc((var(--app-vh) * 100 - ${BAR_RESERVE_PX}px) * 16 / 9))` }
 }
 
 // Nested page-scroll lock (main fullscreen and the Previous Programs player can
@@ -28,6 +30,23 @@ export function playerFrameStyle(size: PlayerSize): CSSProperties {
 let scrollLocks = 0
 let savedHtmlOverflow = ''
 let savedBodyOverflow = ''
+
+// iPhone rotated fullscreen: while any player is in it, the whole app root is
+// rotated to landscape (globals.css, html[data-rotated-fs]). Counted because the
+// main and previous players can both be fullscreen at once.
+let rotatedHolds = 0
+export function holdRotatedApp(): () => void {
+  if (typeof document === 'undefined') return () => {}
+  rotatedHolds += 1
+  document.documentElement.setAttribute('data-rotated-fs', '')
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    rotatedHolds = Math.max(0, rotatedHolds - 1)
+    if (rotatedHolds === 0) document.documentElement.removeAttribute('data-rotated-fs')
+  }
+}
 
 export function lockPageScroll(): () => void {
   if (typeof document === 'undefined') return () => {}

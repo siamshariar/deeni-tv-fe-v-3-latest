@@ -124,7 +124,7 @@ const ChannelSelectorModal = ({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.9, y: 20 }}
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
-            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full ${
+            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] ${
               isMobile ? 'max-w-sm' : 'max-w-2xl'
             } bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-[70] overflow-hidden`}
           >
@@ -447,7 +447,7 @@ const BrandedLoadingOverlay = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3 }}
-          className="absolute inset-0 z-[45] flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black"
+          className="absolute inset-0 z-[45] will-change-transform flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black"
         >
           {/* Background pattern */}
           <div className="absolute inset-0 opacity-5">
@@ -845,6 +845,8 @@ export function SyncedVideoPlayer({
   // short after a mid-play stall.
   const movingSinceRef = useRef(0)
   const stallCoverNeedMsRef = useRef(3000)
+  const showBrandedOverlayRef = useRef(false)
+  useEffect(() => { showBrandedOverlayRef.current = showBrandedOverlay }, [showBrandedOverlay])
   // Previous Programs player open → the main iframe is hidden (see render)
   const [previousPlayerOpen, setPreviousPlayerOpen] = useState(false)
   const stallCoverRef = useRef(false)
@@ -2540,8 +2542,18 @@ export function SyncedVideoPlayer({
         lastT = t
         lastMoveAtRef.current = now
         if (!movingSinceRef.current) movingSinceRef.current = now
-        if (stallCoverRef.current && now - movingSinceRef.current >= stallCoverNeedMsRef.current) {
+        // Single authority for taking the branded screen away: whoever put it
+        // up (start, transition, stall), it goes once the video has really
+        // been moving long enough — ~3s normally (YouTube's start title bar),
+        // shorter after a mid-play stall. Never during a transition.
+        const need = stallCoverRef.current ? stallCoverNeedMsRef.current : 3000
+        if (
+          (stallCoverRef.current || showBrandedOverlayRef.current) &&
+          !isTransitioningRef.current &&
+          now - movingSinceRef.current >= need
+        ) {
           stallCoverRef.current = false
+          clearBrandedOverlayHideTimeout()
           setShowBrandedOverlay(false)
         }
         return
@@ -2892,7 +2904,9 @@ export function SyncedVideoPlayer({
               // Hidden while the previous player is open (it covers the main
               // one; on iOS the video layer could otherwise paint through), and
               // on iOS while any modal is open for the same reason.
-              opacity: iframeVisible && !previousPlayerOpen && !(isIOS && (isOverlayOpen || showChannelSelector || showPreviousModal)) ? 1 : 0,
+              // Also hidden under the (opaque) branded screen, so YouTube's own
+              // spinner/title can never paint through it on iOS.
+              opacity: iframeVisible && !showBrandedOverlay && !previousPlayerOpen && !(isIOS && (isOverlayOpen || showChannelSelector || showPreviousModal)) ? 1 : 0,
             }}
           />
           <div className="absolute inset-0 w-full h-full pointer-events-auto" />
@@ -3046,7 +3060,7 @@ export function SyncedVideoPlayer({
                 initial={{ opacity: 0, y: -8 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.15 }}
-                className="absolute top-3 right-3 z-30"
+                className="absolute top-3 right-3 z-30 will-change-transform"
               >
                 <div className={`flex items-center gap-1.5 bg-black/70 backdrop-blur-xl rounded-full border border-white/20 ${
                   isMobile ? 'px-2.5 py-1' : 'px-3 py-1.5'
@@ -3163,7 +3177,7 @@ export function SyncedVideoPlayer({
         {/* Bottom Controls - OUTSIDE video frame - ALWAYS VISIBLE - Unified with iframe */}
         <div className={
           isFullscreen
-            ? `absolute inset-x-0 bottom-0 z-40 transition-opacity duration-300 ${fsControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
+            ? `absolute inset-x-0 bottom-0 z-50 will-change-transform transition-opacity duration-300 ${fsControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
             : 'w-full'
         }>
           {/* Fullscreen: program title + time + progress above the bar (same as

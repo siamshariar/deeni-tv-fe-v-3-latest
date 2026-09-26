@@ -48,7 +48,7 @@ const BrandedLoadingOverlay = ({
           onClick={onTap}
           role={isTapMode ? 'button' : undefined}
           aria-label={isTapMode ? 'Tap to play' : undefined}
-          className={`absolute inset-0 z-[45] flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black ${isTapMode ? 'cursor-pointer' : ''}`}
+          className={`absolute inset-0 z-[45] will-change-transform flex flex-col items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black ${isTapMode ? 'cursor-pointer' : ''}`}
         >
           {/* Background pattern */}
           <div className="absolute inset-0 opacity-5">
@@ -1012,6 +1012,9 @@ const PreviousVideoPlayer = ({
       <div
         style={fullscreenStyle ?? playerFrameStyle(isDesktop ? 'desktop' : isTablet ? 'tablet' : 'mobile')}
         onMouseMove={() => { if (!isCoarsePointer) bumpControls() }}
+        // Any tap anywhere on the player (video, loading/stall screen, bar)
+        // shows the controls for CONTROLS_HIDE_MS
+        onPointerDown={() => bumpControls()}
         className={
           isFullscreen
             ? `relative overflow-hidden bg-black ${controlsShown ? '' : 'cursor-none'}`
@@ -1030,14 +1033,18 @@ const PreviousVideoPlayer = ({
           <div
             ref={containerRef}
             className="absolute inset-0 w-full h-full"
-            style={{ opacity: iframeShown ? 1 : 0 }}
+            // Also hidden whenever an opaque cover (branded loading / Tap to
+            // Play / stall / pause cover) is up: nothing visible changes, but on
+            // iOS the video layer can paint above HTML — this guarantees
+            // YouTube's own UI never shows through our screens.
+            style={{ opacity: iframeShown && !isVideoLoading && !needsTap && !isStalled && (isPlaying || isBuffering) ? 1 : 0 }}
           />
 
           {/* Cover YouTube's own paused / end screens (title bar, "More videos",
               suggestions) with the program thumbnail */}
           {iframeShown && !isPlaying && !isBuffering && !needsTap && video && (
             <div
-              className="absolute inset-0 z-10 bg-black bg-cover bg-center"
+              className="absolute inset-0 z-10 will-change-transform bg-black bg-cover bg-center"
               style={{ backgroundImage: `url(https://i.ytimg.com/vi/${video.videoId}/hqdefault.jpg)` }}
             >
               <div className="absolute inset-0 bg-black/55" />
@@ -1054,7 +1061,7 @@ const PreviousVideoPlayer = ({
           />
 
           {/* Top-right badge */}
-          <div className={`absolute top-3 right-3 z-30 ${fadeCls}`}>
+          <div className={`absolute top-3 right-3 z-30 will-change-transform ${fadeCls}`}>
             <div className={`flex items-center gap-1.5 bg-black/70 backdrop-blur-xl rounded-full border border-white/20 ${isMobile ? 'px-2.5 py-1' : 'px-3 py-1.5'}`}>
               <History className={isMobile ? 'h-3 w-3 text-white/80' : 'h-3.5 w-3.5 text-white/80'} />
               <span className={`text-white font-semibold ${isMobile ? 'text-[11px]' : 'text-xs'}`}>Previous Program</span>
@@ -1070,7 +1077,7 @@ const PreviousVideoPlayer = ({
 
           {/* Title + progress (inside the video when not fullscreen) */}
           {!isFullscreen && (
-            <div className={`absolute inset-x-0 bottom-0 z-30 bg-gradient-to-t from-black/90 via-black/50 to-transparent ${fadeCls}`}>
+            <div className={`absolute inset-x-0 bottom-0 z-30 will-change-transform bg-gradient-to-t from-black/90 via-black/50 to-transparent ${fadeCls}`}>
               {infoBlock}
             </div>
           )}
@@ -1084,9 +1091,12 @@ const PreviousVideoPlayer = ({
           />
         </div>
 
-        {/* Bottom bar — same as the main player; floats and auto-hides in fullscreen */}
+        {/* Bottom bar — same as the main player; floats and auto-hides in
+            fullscreen. z-50 there: above the branded loading/stall screen
+            (z-45), so Close and Exit-fullscreen stay reachable while it's
+            loading or buffering. */}
         {isFullscreen ? (
-          <div className={`absolute inset-x-0 bottom-0 z-40 bg-gradient-to-t from-black/95 via-black/70 to-transparent ${fadeCls}`}>
+          <div className={`absolute inset-x-0 bottom-0 z-50 will-change-transform bg-gradient-to-t from-black/95 via-black/70 to-transparent ${fadeCls}`}>
             {infoBlock}
             {controlBar}
           </div>
@@ -1165,7 +1175,7 @@ export function PreviousVideosModal({
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ duration: 0.2 }}
-              className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-h-[calc(var(--app-vh)*80)] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-[70] overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
+              className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-h-[calc(var(--app-vh)*80)] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-[70] overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
             >
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-white/10">

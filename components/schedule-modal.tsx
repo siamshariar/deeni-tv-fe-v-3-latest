@@ -48,7 +48,7 @@ export function ScheduleModal({ isOpen, onClose, schedule = [], currentProgramId
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
             transition={{ duration: 0.2 }}
-            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-full max-h-[calc(var(--app-vh)*80)] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-50 overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
+            className={`fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-h-[calc(var(--app-vh)*80)] bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 rounded-2xl shadow-2xl border border-white/10 z-50 overflow-hidden ${isMobile ? 'max-w-sm' : 'max-w-2xl'}`}
           >
             {/* Header */}
             <div className="flex items-center justify-between p-4 border-b border-white/10">

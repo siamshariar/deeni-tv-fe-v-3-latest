@@ -883,7 +883,7 @@ export function SyncedVideoPlayer({
   const playerRef = useRef<HTMLDivElement>(null)
   // z-50: above the Donate button, below the page's modals (which render after
   // the player at z-50) and the player's own modals (z-60+)
-  const { isFullscreen, fullscreenStyle, toggleFullscreen } = useFullscreen({ zIndex: 50 })
+  const { isFullscreen, fullscreenStyle, toggleFullscreen, exitFullscreen: exitMainFullscreen } = useFullscreen({ zIndex: 50 })
   // Fullscreen: the bar overlays the video and hides itself; a tap / mouse move
   // shows it for FS_CONTROLS_HIDE_MS.
   const FS_CONTROLS_HIDE_MS = 3500
@@ -3190,27 +3190,6 @@ export function SyncedVideoPlayer({
             ? `absolute inset-x-0 bottom-0 z-50 will-change-transform transition-opacity duration-300 ${fsControlsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}`
             : 'w-full'
         }>
-          {/* Fullscreen: program title + time + progress above the bar (same as
-              the previous player); shown/hidden together with the bar */}
-          {isFullscreen && currentProgram && (
-            <div className="px-3 sm:px-6 pt-10 pb-2 bg-gradient-to-t from-black/85 via-black/50 to-transparent">
-              <div className="mb-1.5 flex items-end justify-between gap-3">
-                <h3 className={`min-w-0 truncate font-semibold text-white drop-shadow-md ${isMobile ? 'text-xs' : 'text-sm md:text-base'}`}>
-                  {currentProgram.title}
-                </h3>
-                <span className={`flex-shrink-0 font-mono tabular-nums text-white/80 ${isMobile ? 'text-[10px]' : 'text-xs'}`}>
-                  {displayTime} / {formatTime(videoDuration)}
-                </span>
-              </div>
-              {/* Live broadcast: progress is shown, not seekable */}
-              <div className="relative h-1 w-full rounded-full bg-white/30">
-                <div
-                  className="absolute inset-y-0 left-0 rounded-full bg-red-600"
-                  style={{ width: `${videoDuration > 0 ? Math.min(100, (currentTime / videoDuration) * 100) : 0}%` }}
-                />
-              </div>
-            </div>
-          )}
           <div className={`bg-black/60 backdrop-blur-xl border-white/10 px-3 py-3 sm:px-6 sm:py-4 ${
             isFullscreen ? 'border-t' : 'border border-t-0 rounded-b-2xl md:rounded-b-3xl'
           }`}>
@@ -3326,6 +3305,10 @@ export function SyncedVideoPlayer({
         onPlayVideo={handlePlayFromPrevious}
         currentChannelId={currentChannelId}
         openFullscreen={isFullscreen}
+        // Previous player left fullscreen (minimized) → main leaves it too, so
+        // the app un-rotates and the previous player returns to its normal box;
+        // closing it afterwards leaves main in normal (not fullscreen) mode.
+        onFullscreenExit={() => { if (isFullscreen) exitMainFullscreen() }}
         onPauseMainPlayer={() => {
           // MUTE main player when watching from history (don't destroy). The
           // hold keeps it muted even if buffering/stall recovery or a PLAYING

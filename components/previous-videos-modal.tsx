@@ -21,6 +21,8 @@ interface PreviousVideosModalProps {
   onResumeMainPlayer?: () => void
   // Main player is fullscreen → open the previous player fullscreen too
   openFullscreen?: boolean
+  // The previous player left fullscreen (minimize, not close)
+  onFullscreenExit?: () => void
 }
 
 // Branded Loading Overlay - Shows during YouTube iframe loading. Same look as
@@ -378,6 +380,7 @@ const PreviousVideoPlayer = ({
   isOpen,
   warmVideoId,
   openFullscreen = false,
+  onFullscreenExit,
   onClose,
   controllerRef,
 }: {
@@ -387,6 +390,7 @@ const PreviousVideoPlayer = ({
   // so the first pick can start playback inside the tap itself.
   warmVideoId?: string
   openFullscreen?: boolean
+  onFullscreenExit?: () => void
   onClose: () => void
   controllerRef: React.Ref<PreviousPlayerHandle>
 }) => {
@@ -433,6 +437,16 @@ const PreviousVideoPlayer = ({
   const [showVolumeSlider, setShowVolumeSlider] = useState(false)
   const [controlsVisible, setControlsVisible] = useState(true)
   const { fsMode, isFullscreen, rotated, fullscreenStyle, enterFullscreen, exitFullscreen, toggleFullscreen } = useFullscreen({ zIndex: 100 })
+  // Tell the parent when the user leaves fullscreen (minimize) — but not when
+  // fullscreen ends because the player is being closed.
+  const closingRef = useRef(false)
+  const wasFullscreenRef = useRef(false)
+  useEffect(() => {
+    if (wasFullscreenRef.current && !isFullscreen && isOpenRef.current && !closingRef.current) {
+      onFullscreenExit?.()
+    }
+    wasFullscreenRef.current = isFullscreen
+  }, [isFullscreen, onFullscreenExit])
 
   useEffect(() => {
     isOpenRef.current = isOpen
@@ -655,6 +669,7 @@ const PreviousVideoPlayer = ({
 
   useImperativeHandle(controllerRef, () => ({
     play: (v: VideoProgram) => {
+      closingRef.current = false
       setControlsVisible(true)
       // Match the main player: fullscreen there → fullscreen here, else normal
       if (openFullscreen && fsMode === 'none') void enterFullscreen()
@@ -808,6 +823,7 @@ const PreviousVideoPlayer = ({
   }, [])
 
   const handleClose = useCallback(() => {
+    closingRef.current = true
     clearWatchdog()
     // Stop (not just pause) and mute. A paused video keeps its loaded stream
     // and decoder, which starved the main player: after a previous program had
@@ -1119,6 +1135,7 @@ export function PreviousVideosModal({
   onPauseMainPlayer,
   onResumeMainPlayer,
   openFullscreen = false,
+  onFullscreenExit,
 }: PreviousVideosModalProps) {
   const isMobile = useMediaQuery('(max-width: 640px)')
   const [mounted, setMounted] = useState(false)
@@ -1256,6 +1273,7 @@ export function PreviousVideosModal({
         isOpen={showVideoPlayer}
         warmVideoId={isOpen ? videos[0]?.videoId : undefined}
         openFullscreen={openFullscreen}
+        onFullscreenExit={onFullscreenExit}
         onClose={handleCloseVideoPlayer}
         controllerRef={playerControllerRef}
       />

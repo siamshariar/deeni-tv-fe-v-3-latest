@@ -922,6 +922,12 @@ export function SyncedVideoPlayer({
   const playbackProgressWatchTimeRef = useRef(0)
   const playbackProgressWatchAtRef = useRef(0)
   const currentLoadAttemptRef = useRef(0)
+  // Where the current schedule came from ('external-api' is authoritative).
+  const scheduleSourceRef = useRef<'external-api' | 'fallback'>('fallback')
+  // loadChannel is defined further down; callbacks declared before it (sync,
+  // playNextVideo) reach it through this ref.
+  const loadChannelRef = useRef<((channelId: string, options?: { preferUnmutedStart?: boolean; isRecoveryRetry?: boolean; prefetchedResult?: any }) => Promise<void>) | null>(null)
+  const lastNoNextReloadAtRef = useRef(0)
   // True while the Previous Programs player owns the screen and audio. The main
   // player keeps running muted underneath; on iOS it barely progresses then, so
   // the stall watchdog must stand down (it would unmute it and even reload it).
@@ -1176,8 +1182,20 @@ export function SyncedVideoPlayer({
 
   // Play next video function - CRITICAL for continuous playback
   const playNextVideo = useCallback(() => {
-    if (isTransitioningRef.current || !currentProgram || !nextProgram || !currentChannelId) {
+    if (isTransitioningRef.current || !currentProgram || !currentChannelId) {
       console.log('❌ Cannot play next video: missing program or channel')
+      return
+    }
+    if (!nextProgram) {
+      // Nothing queued (e.g. the API sent no upcoming list): don't stop on a
+      // finished video — reload the live schedule. At most every 20s so a
+      // lagging API that still reports the finished video can't loop us.
+      const now = Date.now()
+      if (now - lastNoNextReloadAtRef.current > 20000) {
+        lastNoNextReloadAtRef.current = now
+        console.log('⏭️ No queued next program — reloading the live schedule')
+        void loadChannelRef.current?.(currentChannelId, { preferUnmutedStart: true })
+      }
       return
     }
     
@@ -1385,6 +1403,9 @@ export function SyncedVideoPlayer({
         previousPrograms: (Array.isArray(prevList) ? prevList : []).map(mapProg),
         upcomingPrograms: (Array.isArray(upList) ? upList : []).map(mapProg),
         _source: 'external-api',
+        // When seekTo was valid — the player adds the time since then when it
+        // actually starts playing (API wait, player start-up, late corrections).
+        _fetchedAt: Date.now(),
       }
     } catch (err) {
       console.warn('⚠️ Browser API call failed, will use local fallback:', err)
@@ -1451,17 +1472,31 @@ export function SyncedVideoPlayer({
           })
         )
 
-        // Strip BOTH the local current video AND (if API is lagging) also the
-        // API-reported current video so neither appears in the upcoming queue.
-        const upcoming = mapped.filter(
-          (p: VideoProgram) => p.videoId !== localCurrentId && p.videoId !== apiCurrentId
-        )
-
-        // If the API has caught up (apiCurrentId === localCurrentId), include
-        // everything that comes after — the filter above already handles that.
-        // If the API is still lagging (apiCurrentId !== localCurrentId), the API's
-        // currentProgram is the old video; it won't appear in upcoming anyway.
-        // Either way, the result is correct.
+        // Align the API's queue with what is actually playing:
+        //  • API agrees (same current)        → its upcoming list as is
+        //  • API lags (still reports the video that just ended, and ours is in
+        //    its upcoming list)               → what comes AFTER ours
+        //  • API is ahead (ours isn't in its list) → we are behind the live
+        //    broadcast. Stripping its current program here used to SKIP a
+        //    program at every transition. With authoritative API data, rejoin
+        //    live instead; with fallback data keep our queue untouched.
+        let upcoming: VideoProgram[]
+        if (!apiCurrentId || apiCurrentId === localCurrentId) {
+          upcoming = mapped.filter((p: VideoProgram) => p.videoId !== localCurrentId)
+        } else {
+          const ourIndex = mapped.findIndex((p: VideoProgram) => p.videoId === localCurrentId)
+          if (ourIndex >= 0) {
+            upcoming = mapped.slice(ourIndex + 1)
+          } else {
+            if (result._source === 'external-api' && loadChannelRef.current) {
+              console.log('⏩ Behind the live schedule after a transition — rejoining live')
+              void loadChannelRef.current(channelId, { preferUnmutedStart: true, prefetchedResult: result })
+            } else {
+              console.log('ℹ️ Fallback schedule does not match what is playing — keeping the current queue')
+            }
+            return
+          }
+        }
 
         setUpcomingVideos(upcoming)
         if (upcoming[0]) setNextProgram(upcoming[0])
@@ -1643,6 +1678,8 @@ export function SyncedVideoPlayer({
       if (isStaleLoadAttempt()) return
 
       armChannelLoadTimeout()
+      // Moment the schedule's seekTo refers to (fallback data is computed now)
+      const scheduleAt: number = typeof result._fetchedAt === 'number' ? result._fetchedAt : Date.now()
 
       const offset = result.serverTime - clientTime
       setServerTimeOffset(offset)
@@ -1675,23 +1712,10 @@ export function SyncedVideoPlayer({
       setTimeRemaining(formatTime(timeRemaining))
       setVideoDuration(program.duration)
       
-      // Get next program from upcomingPrograms
-      if (result.upcomingPrograms && result.upcomingPrograms.length > 0) {
-        const nextProg = result.upcomingPrograms[0]
-        const nextProgram: VideoProgram = {
-          id: nextProg.ytVideoId,
-          videoId: nextProg.ytVideoId,
-          title: nextProg.title,
-          description: nextProg.title,
-          duration: nextProg.duration,
-          category: 'Lecture',
-          language: 'Bengali',
-          channelId: channelId,
-          thumbnail: `https://img.youtube.com/vi/${nextProg.ytVideoId}/maxresdefault.jpg`
-        }
-        setNextProgram(nextProgram)
-      }
-      
+      // Which kind of source this schedule came from — only the external API is
+      // authoritative enough to re-sync the live position against later.
+      scheduleSourceRef.current = result._source === 'external-api' ? 'external-api' : 'fallback'
+
       // Set cycle info from schedule
       const programs = getChannelPrograms(channelId)
       const currentIndex = programs.findIndex(p => p.videoId === result.currentProgram.ytVideoId)
@@ -1715,7 +1739,11 @@ export function SyncedVideoPlayer({
         }))
         .filter((p: VideoProgram) => p.videoId !== program.videoId)
       setUpcomingVideos(upcoming)
-      
+      // Up next = first item of the de-duplicated queue (the API's raw first item
+      // can be the current video itself). Reset when there is none, so a stale
+      // program from a previously loaded channel can never play next.
+      setNextProgram(upcoming[0] ?? null)
+
       // Notify parent with fresh schedule data so ScheduleModal is up-to-date
       notifyParentScheduleChange(program, upcoming)
       
@@ -1753,7 +1781,12 @@ export function SyncedVideoPlayer({
         setShowStartScreen(false)
         onStartClick?.()
 
-        seekTo(startTime, true)
+        // Live position NOW = the schedule's seekTo + time elapsed since it was
+        // valid (API wait, player start-up) — otherwise every start/rejoin lands
+        // that many seconds behind the broadcast.
+        const elapsedSinceSchedule = Math.max(0, (Date.now() - scheduleAt) / 1000)
+        const liveStartTime = Math.min(startTime + elapsedSinceSchedule, Math.max(0, program.duration - 2))
+        seekTo(liveStartTime, true)
         play()
 
         const duration = getDuration()
@@ -2055,6 +2088,37 @@ export function SyncedVideoPlayer({
       setIsLoading(false)
     }
   }, [volume, isIOS, isAndroid, initializePlayer, loadVideo, seekTo, play, setYouTubeVolume, setYouTubeMuted, onChannelChange, onStartClick, getDuration, getCurrentTime, getIsMuted, fetchFromBrowserAPI, notifyParentScheduleChange, isPrimedRef, setPlayerCallbacks, unmuteAndResume, destroy, clearPlaybackStartWatchdog, clearBrandedOverlayHideTimeout, hideBrandedOverlayAfterDelay, clearChannelLoadTimeout, primePlayer])
+
+  useEffect(() => { loadChannelRef.current = loadChannel }, [loadChannel])
+
+  // Back to the live position after the Previous Programs player closes. iPhones
+  // throttle the muted main stream while another video plays, so it can come
+  // back minutes behind the broadcast (Android/web keep playing → no-op there).
+  // Only against the authoritative external API; small offsets are left alone.
+  const resyncToLive = useCallback(async () => {
+    const channelId = currentChannelId
+    if (!channelId || scheduleSourceRef.current !== 'external-api') return
+    const requestedAt = Date.now()
+    const result = await Promise.race([
+      fetchFromBrowserAPI(channelId),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 8000)),
+    ])
+    if (!result?.currentProgram?.ytVideoId || !mountedRef.current || previousPlayerActiveRef.current) return
+    if (isTransitioningRef.current) return
+    // seekTo was computed when the server answered — add the time since then
+    const liveSeek = (result.currentProgram.seekTo || 0) + (Date.now() - requestedAt) / 1000
+    if (result.currentProgram.ytVideoId === lastVideoIdRef.current) {
+      const drift = liveSeek - getCurrentTime()
+      if (Math.abs(drift) > 20) {
+        console.log(`⏩ Rejoining live: ${Math.round(drift)}s off the broadcast`)
+        seekTo(liveSeek, true)
+        play()
+      }
+    } else {
+      console.log('⏩ The live program changed while away — rejoining live')
+      void loadChannelRef.current?.(channelId, { preferUnmutedStart: true, prefetchedResult: result })
+    }
+  }, [currentChannelId, fetchFromBrowserAPI, getCurrentTime, seekTo, play])
 
   const handleFirstTimeStart = useCallback(() => {
     if (startInProgressRef.current) return
@@ -3351,6 +3415,12 @@ export function SyncedVideoPlayer({
               setYouTubeVolume(volume)
             }, delay)
           }
+          // Then make sure it is at the LIVE position (it may have fallen
+          // behind while throttled in the background on iPhone).
+          setTimeout(() => {
+            if (!mountedRef.current || previousPlayerActiveRef.current) return
+            void resyncToLive()
+          }, 1200)
           // Do NOT close the Previous Programs modal - it stays open
           // Do NOT reload or restart the live TV
         }}

@@ -183,11 +183,113 @@ const BENGALI_VIDEOS: VideoProgram[] = [
   }
 ]
 
-// English Channel - no static fallback; content served entirely via live API
-const ENGLISH_VIDEOS: VideoProgram[] = []
+// English Channel - offline fallback used only when the live API is unreachable.
+// Durations are the real YouTube lengths: the broadcast math depends on them.
+const ENGLISH_VIDEOS: VideoProgram[] = [
+  {
+    id: 'e1',
+    videoId: 'TBjvoct0t5E',
+    title: 'ALL of your Ramadan Questions Answered | Sh. Waleed Basyouni & Sh. Ammar Alshukry',
+    description: 'Q&A on fasting, moon-sighting, health issues & rulings.',
+    duration: 8507,
+    category: 'Q&A',
+    language: 'English',
+    channelId: 'english-1',
+    thumbnail: 'https://img.youtube.com/vi/TBjvoct0t5E/maxresdefault.jpg'
+  },
+  {
+    id: 'e2',
+    videoId: 'jNMXHNinAYE',
+    title: "Special Ramadan 2026 Q&A: Work-Life Balance, Qur'an Completions & Fiqh of Fasting | Ust. Tim Humble",
+    description: "Answers to common Ramadan questions (work-life balance, Qur'an, fasting).",
+    duration: 3554,
+    category: 'Q&A',
+    language: 'English',
+    channelId: 'english-1',
+    thumbnail: 'https://img.youtube.com/vi/jNMXHNinAYE/maxresdefault.jpg'
+  },
+  {
+    id: 'e3',
+    videoId: 'nMnPiELXfDs',
+    title: 'Special Ramadan Q&A | Ask Shaykh YQ #61',
+    description: 'Knowledge-focused Q&A with scholar responses.',
+    duration: 3302,
+    category: 'Q&A',
+    language: 'English',
+    channelId: 'english-1',
+    thumbnail: 'https://img.youtube.com/vi/nMnPiELXfDs/maxresdefault.jpg'
+  },
+  {
+    id: 'e4',
+    videoId: 'qyeV34J6riI',
+    title: 'Q&A: Making up a Broken Qada Fast by Mufti Abdur Rahman ibn Yusuf',
+    description: 'Scholarly discussion on making up missed fasts.',
+    duration: 48,
+    category: 'Q&A',
+    language: 'English',
+    channelId: 'english-1',
+    thumbnail: 'https://img.youtube.com/vi/qyeV34J6riI/maxresdefault.jpg'
+  },
+  {
+    id: 'e5',
+    videoId: 'XOTlqHSCUp0',
+    title: 'Can we Abstain from Fasting during Examinations? - Dr Zakir Naik',
+    description: 'Scholar answers practical fasting questions for students.',
+    duration: 131,
+    category: 'Q&A',
+    language: 'English',
+    channelId: 'english-1',
+    thumbnail: 'https://img.youtube.com/vi/XOTlqHSCUp0/maxresdefault.jpg'
+  }
+]
 
-// Arabic Channel - no static fallback; content served entirely via live API
-const ARABIC_VIDEOS: VideoProgram[] = []
+// Arabic Channel - offline fallback used only when the live API is unreachable.
+const ARABIC_VIDEOS: VideoProgram[] = [
+  {
+    id: 'a1',
+    videoId: 'uWA_K1gWws8',
+    title: 'اسئلة واجوبة في الصوم والإفطار | الشيخ صالح الفوزان',
+    description: 'شرح كبير بأسلوب الأسئلة والأجوبة حول أحكام الصيام',
+    duration: 3823,
+    category: 'Q&A',
+    language: 'Arabic',
+    channelId: 'arabic-1',
+    thumbnail: 'https://img.youtube.com/vi/uWA_K1gWws8/maxresdefault.jpg'
+  },
+  {
+    id: 'a2',
+    videoId: 'Iu2af50jiow',
+    title: 'أسئلة دينية عن شهر رمضان | 50 سؤال وجواب',
+    description: 'أسئلة وأجوبة تعليمية على شكل اختبار باللغة العربية',
+    duration: 1253,
+    category: 'Q&A',
+    language: 'Arabic',
+    channelId: 'arabic-1',
+    thumbnail: 'https://img.youtube.com/vi/Iu2af50jiow/maxresdefault.jpg'
+  },
+  {
+    id: 'a3',
+    videoId: 'QdmoSCQEH-o',
+    title: '30 سؤال وجواب عن شهر رمضان',
+    description: 'أسئلة تعليمية عن صيام رمضان',
+    duration: 1041,
+    category: 'Q&A',
+    language: 'Arabic',
+    channelId: 'arabic-1',
+    thumbnail: 'https://img.youtube.com/vi/QdmoSCQEH-o/maxresdefault.jpg'
+  },
+  {
+    id: 'a4',
+    videoId: '5lFSrPoqkMw',
+    title: 'اسئلة دينية صعبة واجوبتها عن شهر رمضان',
+    description: 'أسئلة وأجوبة إسلامية عميقة عن رمضان',
+    duration: 946,
+    category: 'Q&A',
+    language: 'Arabic',
+    channelId: 'arabic-1',
+    thumbnail: 'https://img.youtube.com/vi/5lFSrPoqkMw/maxresdefault.jpg'
+  }
+]
 
 // Define channels - No flags, only channel names
 // Channel IDs map to API lid (language/channel IDs)
@@ -386,27 +488,29 @@ export function clearPreviousVideos(channelId: string): void {
   }
 }
 
-// True only when this channel has its own embedded programs (currently just Bangla).
+// True only when this channel has its own embedded programs (Bangla, English, Arabic).
 // Callers use this to detect when getChannelPrograms() is about to substitute
 // a different channel's content, so they can surface that instead of staying silent.
 export function channelHasEmbeddedPrograms(channelId: string): boolean {
-  const channel = CHANNELS.find(c => c.id === channelId)
+  const channel = CHANNELS.find(c => c.id === resolveLocalChannelId(channelId))
   return !!(channel?.programs && channel.programs.length > 0)
 }
 
-// Get channel programs (falls back to Bangla if channel has no programs).
+// Get channel programs. Accepts either a local id ('english-1') or an API
+// channel id ('3'). A channel without embedded programs gets another channel
+// of the same language (e.g. Quran - English → English), and only then Bangla.
 // This fallback exists so callers never divide by a zero-length schedule —
 // it is NOT a substitute for real per-channel content. Check
 // channelHasEmbeddedPrograms() first if the caller needs to know whether the
 // returned programs actually belong to the requested channel.
 export function getChannelPrograms(channelId: string): VideoProgram[] {
-  const channel = CHANNELS.find(c => c.id === channelId)
-  const programs = channel?.programs
-  // Fall back to Bangla programs if this channel has none yet
-  if (!programs || programs.length === 0) {
-    return CHANNELS[0].programs
-  }
-  return programs
+  const localId = resolveLocalChannelId(channelId)
+  const programs = CHANNELS.find(c => c.id === localId)?.programs
+  if (programs && programs.length > 0) return programs
+
+  const lid = CHANNEL_LID_MAP[localId]
+  const sameLanguage = CHANNELS.find(c => c.programs.length > 0 && CHANNEL_LID_MAP[c.id] === lid)
+  return sameLanguage ? sameLanguage.programs : CHANNELS[0].programs
 }
 
 // Get total duration for a channel
@@ -625,6 +729,57 @@ export function getStoredApiChannels(): ApiChannel[] {
   }
 }
 
+// Same ids and order as the live tv-channels API, used whenever it is unreachable.
+// Keep it in step with the API: channel ids are saved in localStorage and in
+// the URLs the player calls, so a different numbering selects the wrong channel.
+export const DEFAULT_API_CHANNELS: ApiChannel[] = [
+  { id: 1, title: 'Bangla', localizationId: '5', isQuran: null },
+  { id: 2, title: 'Quran - Bangla', localizationId: '5', isQuran: true },
+  { id: 3, title: 'English', localizationId: '6', isQuran: null },
+  { id: 4, title: 'Quran - English', localizationId: '6', isQuran: true },
+  { id: 5, title: 'Arabic', localizationId: '7', isQuran: null },
+  { id: 6, title: 'Quran - Arabic', localizationId: '7', isQuran: true },
+  { id: 7, title: 'Urdu', localizationId: '8', isQuran: null },
+  { id: 8, title: 'Chinese', localizationId: '9', isQuran: null },
+  { id: 9, title: 'Quran - Chinese', localizationId: '9', isQuran: true },
+]
+
+/** The API channel for an id — from the stored API list, else the defaults. */
+export function findApiChannel(channelId: string): ApiChannel | undefined {
+  const byId = (c: ApiChannel) => String(c.id) === channelId
+  return getStoredApiChannels().find(byId) ?? DEFAULT_API_CHANNELS.find(byId)
+}
+
+/**
+ * Map a channel id to its entry in CHANNELS. The player uses API channel ids
+ * ('3'), the embedded data uses local ids ('english-1'); the two are matched
+ * by language (localizationId) and the Quran flag. Pass `hint` when the
+ * caller already knows them (e.g. a server route given ?lid=&iq=).
+ */
+export function resolveLocalChannelId(
+  channelId: string,
+  hint?: { lid?: string | number | null; isQuran?: boolean | null }
+): string {
+  if (CHANNELS.some(c => c.id === channelId)) return channelId
+  const apiChannel = hint?.lid != null && hint.lid !== ''
+    ? { localizationId: String(hint.lid), isQuran: hint.isQuran ?? null }
+    : findApiChannel(channelId)
+  if (!apiChannel) return channelId
+  const match = CHANNELS.find(c =>
+    String(getChannelLid(c.id)) === String(apiChannel.localizationId) &&
+    isQuranChannel(c.id) === (apiChannel.isQuran === true)
+  )
+  return match?.id ?? channelId
+}
+
+/** The language (API localizationId, '5' = Bangla) of a channel, or null if unknown. */
+export function getChannelLocalizationId(channelId?: string | null): string | null {
+  if (!channelId) return null
+  const apiChannel = findApiChannel(channelId)
+  if (apiChannel) return String(apiChannel.localizationId)
+  return CHANNEL_LID_MAP[channelId] ? String(CHANNEL_LID_MAP[channelId]) : null
+}
+
 /** Persist channel list to localStorage exactly as received from the API */
 export function saveApiChannels(channels: ApiChannel[]): void {
   if (typeof window === 'undefined') return
@@ -734,12 +889,7 @@ export function buildLocalCurrentVideoResponseFromPrograms(
  * Used by Android-only client fallback when the remote channel API is unavailable.
  */
 export function getFallbackApiChannels(): ApiChannel[] {
-  return CHANNELS.map((channel, index) => ({
-    id: index + 1,
-    title: channel.name,
-    localizationId: String(getChannelLid(channel.id)),
-    isQuran: isQuranChannel(channel.id),
-  }))
+  return DEFAULT_API_CHANNELS.map(channel => ({ ...channel }))
 }
 
 /**
@@ -781,7 +931,8 @@ export async function fetchLocalScheduleData(channelId: string) {
     const localData = await loadLocalScheduleData()
     if (localData?.channels) {
       // Successfully loaded from local asset
-      const channel = localData.channels.find((ch: any) => ch.id === channelId)
+      const localId = resolveLocalChannelId(channelId)
+      const channel = localData.channels.find((ch: any) => ch.id === localId)
       if (channel && channel.programs && channel.programs.length > 0) {
         // Use the schedule actually fetched from the JSON asset, not the
         // hardcoded embedded CHANNELS data — this is what makes the JSON

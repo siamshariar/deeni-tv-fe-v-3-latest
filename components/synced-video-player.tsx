@@ -36,6 +36,7 @@ import {
   saveApiChannels,
   getFallbackApiChannels,
   buildLocalCurrentVideoResponse,
+  findApiChannel,
 } from '@/lib/schedule-utils'
 import { useYouTubePlayer, YT_STATE } from '@/hooks/use-youtube-player'
 import { PreviousVideosModal } from './previous-videos-modal'
@@ -63,6 +64,18 @@ async function parseJsonSafely(response: Response) {
 
 function buildEmbeddedScheduleFallback(channelId: string) {
   return buildLocalCurrentVideoResponse(channelId, 15)
+}
+
+// Our own /api/current-video route, told the channel's language and Quran flag
+// so its server-side API call and local fallback match the selected channel.
+function currentVideoRoutePath(channelId: string) {
+  const params = new URLSearchParams({ channel: channelId })
+  const channel = findApiChannel(channelId)
+  if (channel) {
+    params.set('lid', String(channel.localizationId))
+    params.set('iq', String(channel.isQuran === true))
+  }
+  return `/api/current-video?${params}`
 }
 
 interface SyncedVideoPlayerProps {
@@ -1352,9 +1365,8 @@ export function SyncedVideoPlayer({
 
   const fetchFromBrowserAPI = useCallback(async (channelId: string): Promise<any | null> => {
     try {
-      // Look up channel from localStorage — no static mapping needed
-      const storedChannels = getStoredApiChannels()
-      const channel = storedChannels.find(c => String(c.id) === channelId)
+      // Channel from the stored API list (default list if nothing is stored yet)
+      const channel = findApiChannel(channelId)
       const lid = channel?.localizationId || '5'
 
       let apiUrl = `${EXTERNAL_API_BASE}/live?lid=${lid}`
@@ -1423,7 +1435,7 @@ export function SyncedVideoPlayer({
       let result = await fetchFromBrowserAPI(channelId)
 
       if (!result) {
-        const response = await fetch(`/api/current-video?channel=${channelId}`, {
+        const response = await fetch(currentVideoRoutePath(channelId), {
           headers: { 'Cache-Control': 'no-cache' }
         })
         if (response.ok) {
@@ -1647,7 +1659,7 @@ export function SyncedVideoPlayer({
         try {
           const controller = new AbortController()
           const timeoutId = setTimeout(() => controller.abort(), 10000)
-          const response = await fetch(`/api/current-video?channel=${channelId}`, {
+          const response = await fetch(currentVideoRoutePath(channelId), {
             headers: {
               'Cache-Control': 'no-cache',
               'Pragma': 'no-cache'
@@ -2296,7 +2308,7 @@ export function SyncedVideoPlayer({
       
       // 2️⃣ Fallback to local API route
       if (!result) {
-        const response = await fetch(`/api/current-video?channel=${currentChannelId}`, {
+        const response = await fetch(currentVideoRoutePath(currentChannelId), {
           headers: { 'Cache-Control': 'no-cache' }
         })
         if (response.ok) {

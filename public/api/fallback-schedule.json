@@ -79,14 +79,115 @@
       "name": "English",
       "language": "English",
       "icon": "📺",
-      "programs": []
+      "programs": [
+        {
+          "id": "e1",
+          "videoId": "TBjvoct0t5E",
+          "title": "ALL of your Ramadan Questions Answered | Sh. Waleed Basyouni & Sh. Ammar Alshukry",
+          "description": "Q&A on fasting, moon-sighting, health issues & rulings.",
+          "duration": 8507,
+          "category": "Q&A",
+          "language": "English",
+          "channelId": "english-1",
+          "thumbnail": "https://img.youtube.com/vi/TBjvoct0t5E/maxresdefault.jpg"
+        },
+        {
+          "id": "e2",
+          "videoId": "jNMXHNinAYE",
+          "title": "Special Ramadan 2026 Q&A: Work-Life Balance, Qur'an Completions & Fiqh of Fasting | Ust. Tim Humble",
+          "description": "Answers to common Ramadan questions (work-life balance, Qur'an, fasting).",
+          "duration": 3554,
+          "category": "Q&A",
+          "language": "English",
+          "channelId": "english-1",
+          "thumbnail": "https://img.youtube.com/vi/jNMXHNinAYE/maxresdefault.jpg"
+        },
+        {
+          "id": "e3",
+          "videoId": "nMnPiELXfDs",
+          "title": "Special Ramadan Q&A | Ask Shaykh YQ #61",
+          "description": "Knowledge-focused Q&A with scholar responses.",
+          "duration": 3302,
+          "category": "Q&A",
+          "language": "English",
+          "channelId": "english-1",
+          "thumbnail": "https://img.youtube.com/vi/nMnPiELXfDs/maxresdefault.jpg"
+        },
+        {
+          "id": "e4",
+          "videoId": "qyeV34J6riI",
+          "title": "Q&A: Making up a Broken Qada Fast by Mufti Abdur Rahman ibn Yusuf",
+          "description": "Scholarly discussion on making up missed fasts.",
+          "duration": 48,
+          "category": "Q&A",
+          "language": "English",
+          "channelId": "english-1",
+          "thumbnail": "https://img.youtube.com/vi/qyeV34J6riI/maxresdefault.jpg"
+        },
+        {
+          "id": "e5",
+          "videoId": "XOTlqHSCUp0",
+          "title": "Can we Abstain from Fasting during Examinations? - Dr Zakir Naik",
+          "description": "Scholar answers practical fasting questions for students.",
+          "duration": 131,
+          "category": "Q&A",
+          "language": "English",
+          "channelId": "english-1",
+          "thumbnail": "https://img.youtube.com/vi/XOTlqHSCUp0/maxresdefault.jpg"
+        }
+      ]
     },
     {
       "id": "arabic-1",
       "name": "العربية",
       "language": "Arabic",
       "icon": "📺",
-      "programs": []
+      "programs": [
+        {
+          "id": "a1",
+          "videoId": "uWA_K1gWws8",
+          "title": "اسئلة واجوبة في الصوم والإفطار | الشيخ صالح الفوزان",
+          "description": "شرح كبير بأسلوب الأسئلة والأجوبة حول أحكام الصيام",
+          "duration": 3823,
+          "category": "Q&A",
+          "language": "Arabic",
+          "channelId": "arabic-1",
+          "thumbnail": "https://img.youtube.com/vi/uWA_K1gWws8/maxresdefault.jpg"
+        },
+        {
+          "id": "a2",
+          "videoId": "Iu2af50jiow",
+          "title": "أسئلة دينية عن شهر رمضان | 50 سؤال وجواب",
+          "description": "أسئلة وأجوبة تعليمية على شكل اختبار باللغة العربية",
+          "duration": 1253,
+          "category": "Q&A",
+          "language": "Arabic",
+          "channelId": "arabic-1",
+          "thumbnail": "https://img.youtube.com/vi/Iu2af50jiow/maxresdefault.jpg"
+        },
+        {
+          "id": "a3",
+          "videoId": "QdmoSCQEH-o",
+          "title": "30 سؤال وجواب عن شهر رمضان",
+          "description": "أسئلة تعليمية عن صيام رمضان",
+          "duration": 1041,
+          "category": "Q&A",
+          "language": "Arabic",
+          "channelId": "arabic-1",
+          "thumbnail": "https://img.youtube.com/vi/QdmoSCQEH-o/maxresdefault.jpg"
+        },
+        {
+          "id": "a4",
+          "videoId": "5lFSrPoqkMw",
+          "title": "اسئلة دينية صعبة واجوبتها عن شهر رمضان",
+          "description": "أسئلة وأجوبة إسلامية عميقة عن رمضان",
+          "duration": 946,
+          "category": "Q&A",
+          "language": "Arabic",
+          "channelId": "arabic-1",
+          "thumbnail": "https://img.youtube.com/vi/5lFSrPoqkMw/maxresdefault.jpg"
+        }
+      ]
     },
     {
       "id": "urdu-1",

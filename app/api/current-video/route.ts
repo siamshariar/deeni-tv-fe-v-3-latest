@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { getCurrentProgram, getUpcomingPrograms, getChannelPrograms, CHANNELS, CHANNEL_LID_MAP, isQuranChannel } from '@/lib/schedule-utils'
+import { getCurrentProgram, getUpcomingPrograms, getChannelPrograms, CHANNELS, getChannelLid, isQuranChannel, resolveLocalChannelId } from '@/lib/schedule-utils'
 import { appendFileSync } from 'fs'
 
 const EXTERNAL_API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://api.deeniinfotech.com/api/tv-schedules'
@@ -26,11 +26,11 @@ async function generateServerToken(): Promise<string> {
 // ── Try to fetch from the external API server-side ──
 // Note: Cloudflare may block requests from certain server IPs.
 // If blocked, this returns null and the caller falls back to local schedule.
-async function fetchFromExternalAPI(channelId: string): Promise<any | null> {
+// Same schedule the browser asks for: the channel's language (lid) and Quran flag.
+async function fetchFromExternalAPI(lid: string, isQuran: boolean): Promise<any | null> {
   try {
-    const lid = CHANNEL_LID_MAP[channelId] || 5
     let url = `${EXTERNAL_API_BASE}/live?lid=${lid}`
-    if (isQuranChannel(channelId)) url += '&IS=true'
+    if (isQuran) url += '&iq=true'
 
     const token = await generateServerToken()
     const res = await fetch(url, {
@@ -78,6 +78,17 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const channelId = searchParams.get('channel') || CHANNELS[0].id
+    // The player sends API channel ids ('3') plus the channel's language and
+    // Quran flag; without them the id is looked up in the default channel list.
+    const rawLid = searchParams.get('lid')
+    const lidParam = rawLid && /^\d+$/.test(rawLid) ? rawLid : null
+    const iqParam = searchParams.get('iq')
+    const localChannelId = resolveLocalChannelId(channelId, {
+      lid: lidParam,
+      isQuran: iqParam === null ? null : iqParam === 'true',
+    })
+    const apiLid = lidParam || String(getChannelLid(localChannelId))
+    const apiIsQuran = iqParam === null ? isQuranChannel(localChannelId) : iqParam === 'true'
 
     const responseHeaders = {
       'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0',
@@ -88,7 +99,7 @@ export async function GET(request: Request) {
     }
 
     // ── 1. Try external API first ──
-    const external = await fetchFromExternalAPI(channelId)
+    const external = await fetchFromExternalAPI(apiLid, apiIsQuran)
     if (external) {
       console.log('✅ External API OK (server-side) — channel:', channelId, 'video:', external.currentProgram.ytVideoId)
       logSyncCall(channelId, 'external-api')
@@ -100,9 +111,9 @@ export async function GET(request: Request) {
     logSyncCall(channelId, 'local-schedule')
 
     const serverTime = Date.now()
-    const data = getCurrentProgram(channelId)
-    const upcomingResult = getUpcomingPrograms(channelId, 10)
-    const programs = getChannelPrograms(channelId)
+    const data = getCurrentProgram(localChannelId)
+    const upcomingResult = getUpcomingPrograms(localChannelId, 10)
+    const programs = getChannelPrograms(localChannelId)
 
     const programStartTime = serverTime - (data.currentTime * 1000)
     const programEndTime   = programStartTime + (data.program.duration * 1000)
@@ -151,8 +162,9 @@ export async function GET(request: Request) {
       upcomingPrograms,
       _source: 'local-schedule',
       // True when this channel has no embedded fallback data of its own and
-      // the content above is substituted Bangla programming instead — lets
-      // the client surface that instead of silently misrepresenting it.
+      // the content above is substituted (same-language, else Bangla)
+      // programming instead — lets the client surface that instead of
+      // silently misrepresenting it.
       channelUnavailable: data.channelUnavailable,
     }, { headers: responseHeaders })
 

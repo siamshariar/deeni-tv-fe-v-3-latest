@@ -2,30 +2,12 @@
 
 import { Heart } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { useEffect, useRef, useState } from 'react'
+import { openDonationPage } from '@/lib/donation'
 
-const DEFAULT_URL = 'https://www.deeniinfotech.com/donate#donation-form'
-
-export function DonateButton() {
-  const [donationUrl, setDonationUrl] = useState(DEFAULT_URL)
-  const fetchedRef = useRef(false)
-
-  useEffect(() => {
-    if (fetchedRef.current) return
-    fetchedRef.current = true
-
-    fetch('/api/donation-url', { cache: 'no-store' })
-      .then(async (res) => {
-        const contentType = res.headers.get('content-type') || ''
-        if (!contentType.includes('application/json')) return null
-        return res.json()
-      })
-      .then(data => { if (data?.url) setDonationUrl(data.url) })
-      .catch(() => { /* keep DEFAULT_URL on any error */ })
-  }, [])
-
+// `channelId` is the selected channel: its language decides the donation page.
+export function DonateButton({ channelId }: { channelId?: string }) {
   const handleDonate = () => {
-    window.open(donationUrl, '_blank', 'noopener,noreferrer')
+    openDonationPage(channelId)
   }
 
   return (

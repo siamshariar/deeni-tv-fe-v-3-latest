@@ -2872,9 +2872,24 @@ export function SyncedVideoPlayer({
     }
   }, [])
 
+  // "Tap to unmute": the browser kept the sound off (no tap on the page yet).
+  const answerSoundPrompt = useCallback(() => {
+    unmuteAndResume(volume)
+    setYouTubeMuted(false)
+    setIsMuted(false)
+    setIsVolumeControlsLocked(false)
+    setShowAutoUnmuteNotification(false)
+  }, [unmuteAndResume, volume, setYouTubeMuted])
+
   const toggleMute = useCallback(() => {
     // Prevent muting/unmuting until the real scheduled video is playing
     if (isVolumeControlsLocked) return
+    // While the prompt is up the video is muted although isMuted says otherwise:
+    // the volume button then turns the sound on, like the prompt.
+    if (showAutoUnmuteNotification) {
+      answerSoundPrompt()
+      return
+    }
 
     setIsMuted(prev => {
       const newMuted = !prev
@@ -2885,7 +2900,7 @@ export function SyncedVideoPlayer({
       }
       return newMuted
     })
-  }, [volume, setYouTubeMuted, setYouTubeVolume, isVolumeControlsLocked])
+  }, [volume, setYouTubeMuted, setYouTubeVolume, isVolumeControlsLocked, showAutoUnmuteNotification, answerSoundPrompt])
 
   const handleVolumeChange = useCallback((value: number[]) => {
     // Prevent volume changes until the real scheduled video is playing
@@ -2955,6 +2970,9 @@ export function SyncedVideoPlayer({
   }, [handleActivity, showStartScreen, isLoading, apiError])
 
   const isLastInCycle = currentProgram && cycleInfo.total ? cycleInfo.current === cycleInfo.total : false
+  const soundPromptVisible = showAutoUnmuteNotification && !showStartScreen && playerReady && !apiError
+  // The volume button tells the truth while the browser keeps the sound off.
+  const showMutedVolume = isMuted || soundPromptVisible
 
   return (
     <div className="relative flex items-center justify-center bg-gradient-to-br from-zinc-950 via-zinc-900 to-black min-h-dvh w-full overflow-hidden" suppressHydrationWarning>
@@ -3022,14 +3040,8 @@ export function SyncedVideoPlayer({
 
           {/* Auto-Unmute Notification */}
           <AutoUnmuteNotification
-            isVisible={showAutoUnmuteNotification && !showStartScreen && playerReady && !apiError}
-            onUnmute={() => {
-              unmuteAndResume(volume)
-              setYouTubeMuted(false)
-              setIsMuted(false)
-              setIsVolumeControlsLocked(false)
-              setShowAutoUnmuteNotification(false)
-            }}
+            isVisible={soundPromptVisible}
+            onUnmute={answerSoundPrompt}
           />
           
           {/* Loading overlay */}
@@ -3302,9 +3314,9 @@ export function SyncedVideoPlayer({
       } ${
         isMobile ? 'h-7 w-7' : 'h-9 w-9'
       }`}
-      title={isVolumeControlsLocked ? 'Volume becomes available after the real video starts' : isMuted ? 'Unmute' : 'Mute'}
+      title={isVolumeControlsLocked ? 'Volume becomes available after the real video starts' : showMutedVolume ? 'Unmute' : 'Mute'}
     >
-      {isMuted ? (
+      {showMutedVolume ? (
         <VolumeX className={isMobile ? 'h-3.5 w-3.5' : 'h-4.5 w-4.5'} />
       ) : (
         <Volume2 className={isMobile ? 'h-3.5 w-3.5' : 'h-4.5 w-4.5'} />

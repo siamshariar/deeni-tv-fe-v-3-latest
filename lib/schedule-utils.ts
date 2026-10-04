@@ -723,7 +723,8 @@ export function getStoredApiChannels(): ApiChannel[] {
   if (typeof window === 'undefined') return []
   try {
     const stored = localStorage.getItem(API_CHANNELS_STORAGE_KEY)
-    return stored ? JSON.parse(stored) : []
+    const parsed = stored ? JSON.parse(stored) : []
+    return Array.isArray(parsed) ? parsed : []
   } catch {
     return []
   }

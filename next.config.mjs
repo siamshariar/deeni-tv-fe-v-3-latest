@@ -12,7 +12,7 @@ const nextConfig = {
   // `output: 'export'` here. Removed rather than merged forward — verified
   // by actually running `STATIC_EXPORT=true next build` that it fails
   // outright (`export const dynamic = "force-dynamic"` on /api/sync-ping,
-  // /api/live-schedule, /api/donation-url is incompatible with
+  // /api/live-schedule and the then-existing /api/donation-url is incompatible with
   // `output: 'export'`). The Android build genuinely uses the
   // `build:android-web` script (regular server build + manual asset copy
   // into out/), not Next's static export mode — see ANDROID-OFFLINE-GUIDE.md.
@@ -84,11 +84,7 @@ export default withPWA({
         }
       },
       {
-        urlPattern: /\/api\/donation-url/i,
-        handler: 'NetworkOnly'
-      },
-      {
-        urlPattern: /\/api\/(?!donation-url).*/i,
+        urlPattern: /\/api\/.*/i,
         handler: 'NetworkFirst',
         options: {
           cacheName: 'api-cache',

@@ -11,6 +11,7 @@ import { ChannelSelector } from '@/components/channel-selector'
 import { VideoProgram } from '@/types/schedule'
 import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels, getFallbackApiChannels } from '@/lib/schedule-utils'
 import { clientFetchWithAuth } from '@/lib/client-fetch'
+import { openDonationPage } from '@/lib/donation'
 import { initializeStatusBar } from '@/lib/status-bar-utils'
 
 export default function Home() {
@@ -137,7 +138,7 @@ export default function Home() {
     } else if (option === 'reload') {
       setReloadCounter(c => c + 1)
     } else if (option === 'donate') {
-      window.open('https://www.deeniinfotech.com/donate#donation-form', '_blank', 'noopener,noreferrer')
+      openDonationPage(activeChannelId)
     } else {
       setTimeout(() => {
         setActiveModal(option as 'schedule' | 'about')
@@ -181,7 +182,7 @@ export default function Home() {
       </div> */}
       
       {/* Donate Button - Fixed position */}
-      <DonateButton />
+      <DonateButton channelId={activeChannelId} />
       
       {/* Synchronized Video Player */}
       <SyncedVideoPlayer 

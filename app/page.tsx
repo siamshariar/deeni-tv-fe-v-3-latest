@@ -11,6 +11,7 @@ import { ChannelSelector } from '@/components/channel-selector'
 import { VideoProgram } from '@/types/schedule'
 import { getSavedChannel, saveChannel, ApiChannel, getStoredApiChannels, saveApiChannels, getFallbackApiChannels } from '@/lib/schedule-utils'
 import { clientFetchWithAuth } from '@/lib/client-fetch'
+import { openDonationPage } from '@/lib/donation'
 import { initializeStatusBar } from '@/lib/status-bar-utils'
 
 export default function Home() {
@@ -137,7 +138,7 @@ export default function Home() {
     } else if (option === 'reload') {
       setReloadCounter(c => c + 1)
     } else if (option === 'donate') {
-      window.open('https://www.deeniinfotech.com/donate#donation-form', '_blank', 'noopener,noreferrer')
+      openDonationPage(activeChannelId)
     } else {
       setTimeout(() => {
         setActiveModal(option as 'schedule' | 'about')
@@ -158,7 +159,7 @@ export default function Home() {
   }, [])
 
   if (!isMounted) {
-    return <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning />
+    return <main id="app-root" className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning />
   }
 
   const handleCloseChannelSelector = () => {
@@ -170,7 +171,7 @@ export default function Home() {
   }
 
   return (
-    <main className="relative min-h-screen bg-zinc-950" suppressHydrationWarning>
+    <main id="app-root" className="relative min-h-dvh bg-zinc-950" suppressHydrationWarning>
       {/* Logo Header - Commented out per requirements */}
       {/* <div className="fixed top-2 left-2 sm:top-4 sm:left-4 z-50 flex items-center">
         <img 
@@ -181,7 +182,7 @@ export default function Home() {
       </div> */}
       
       {/* Donate Button - Fixed position */}
-      <DonateButton />
+      <DonateButton channelId={activeChannelId} />
       
       {/* Synchronized Video Player */}
       <SyncedVideoPlayer 
@@ -199,6 +200,7 @@ export default function Home() {
         onReloadStart={handleReloadStart}
         triggerReload={reloadCounter}
         hasUserSelectedChannel={!!activeChannelId}
+        isOverlayOpen={isMenuOpen || isChannelSelectorOpen || activeModal !== null}
       />
       
       {/* Menu Drawer - Slides from bottom */}

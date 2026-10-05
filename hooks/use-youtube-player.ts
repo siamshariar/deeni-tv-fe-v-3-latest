@@ -58,6 +58,26 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
   const onDurationChangeRef = useRef<((duration: number) => void) | null>(null)
   const onReadyRef = useRef<((player: any) => void) | null>(null)
   const apiLoadPromiseRef = useRef<Promise<void> | null>(null)
+  // While true, nothing may unmute this player — set while another player
+  // (the Previous Programs player) owns the audio. Buffering/stall recovery and
+  // PLAYING handlers would otherwise unmute it underneath (double audio).
+  const muteHoldRef = useRef<boolean>(false)
+
+  // Every unmute in this hook goes through here so the mute hold is respected.
+  const unMuteUnlessHeld = (player: any) => {
+    if (muteHoldRef.current) {
+      try { player?.mute?.() } catch (_) {}
+      return
+    }
+    if (typeof player?.unMute === 'function') player.unMute()
+  }
+
+  // YouTube may still switch auto-captions on (viewer/locale preference) even
+  // with cc_load_policy=0 — they rendered over the video. Unload the module.
+  const hideCaptions = (player: any) => {
+    try { player?.unloadModule?.('captions') } catch (_) {}
+    try { player?.unloadModule?.('cc') } catch (_) {}
+  }
 
   const nextOperationToken = useCallback(() => {
     operationTokenRef.current += 1
@@ -246,7 +266,9 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
         videoId: options.videoId,
         playerVars: {
           autoplay: 1,
-          mute: options.muted ? 1 : 0,
+          // A held mute must win here too — this starts the iframe unmuted
+          // without ever calling unMute()
+          mute: options.muted || muteHoldRef.current ? 1 : 0,
           controls: 0,
           disablekb: 1,
           fs: 0,
@@ -254,6 +276,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           rel: 0,
           showinfo: 0,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no auto captions over the broadcast
           start: options.startSeconds || 0,
           playsinline: 1,
           origin: window.location.origin,
@@ -271,10 +294,10 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
             }
             try {
               event.target.setVolume(volumeRef.current)
-              if (isMutedRef.current) {
+              if (isMutedRef.current || muteHoldRef.current) {
                 event.target.mute()
               } else {
-                event.target.unMute()
+                unMuteUnlessHeld(event.target)
               }
               
               // Get video duration from YouTube API
@@ -298,6 +321,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
                 }
               } catch (err) {}
             }
+            if (event.data === YT_STATE.PLAYING) hideCaptions(event.target)
             options.onStateChange?.(event.data)
           },
           onError: (event: any) => {
@@ -393,6 +417,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           rel: 0,
           showinfo: 0,
           iv_load_policy: 3,
+          cc_load_policy: 0, // no auto captions over the broadcast
           playsinline: 1,    // mandatory for iOS inline playback
           origin: typeof window !== 'undefined' ? window.location.origin : '',
           enablejsapi: 1,
@@ -440,9 +465,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
                 // Small delay to ensure video is actually playing
                 setTimeout(() => {
                   try {
-                    if (typeof playerRef.current?.unMute === 'function') {
-                      playerRef.current.unMute()
-                    }
+                    unMuteUnlessHeld(playerRef.current)
                     transitionMutedRef.current = false
                     shouldUnmuteAfterPlayingRef.current = false
                   } catch (_) {}
@@ -450,6 +473,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
               } catch (_) {}
             }
             
+            if (event.data === YT_STATE.PLAYING) hideCaptions(event.target)
             if (onStateChangeRef.current) {
               onStateChangeRef.current(event.data)
             }
@@ -489,13 +513,20 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
       if (typeof playerRef.current.playVideo === 'function') {
         playerRef.current.playVideo()
       }
-      if (typeof playerRef.current.unMute === 'function') {
-        playerRef.current.unMute()
-      }
+      unMuteUnlessHeld(playerRef.current)
       if (typeof playerRef.current.setVolume === 'function') {
         playerRef.current.setVolume(targetVolume)
       }
     } catch (_) {}
+  }, [])
+
+  // Hold (or release) the mute: while held, every unmute path above is a no-op.
+  // Releasing does not unmute by itself — callers unmute explicitly afterwards.
+  const setMuteHold = useCallback((hold: boolean) => {
+    muteHoldRef.current = hold
+    if (hold) {
+      try { playerRef.current?.mute?.() } catch (_) {}
+    }
   }, [])
 
   // Expose the raw loader so callers can opt-in to loading the API on-demand
@@ -610,9 +641,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
           playerRef.current.mute()
         }
       } else {
-        if (typeof playerRef.current.unMute === 'function') {
-          playerRef.current.unMute()
-        }
+        unMuteUnlessHeld(playerRef.current)
       }
     } catch (err) {}
   }, [])
@@ -721,6 +750,7 @@ export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true
     getDuration,
     setVolume,
     setMuted,
+    setMuteHold,
     play,
     seekTo,
     getCurrentTime,

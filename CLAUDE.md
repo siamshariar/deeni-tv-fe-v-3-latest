@@ -48,7 +48,11 @@ Because this is a pure function of time, every client independently computes the
 2. **Local schedule computation** (`getCurrentProgram()` etc. in `lib/schedule-utils.ts`, using the embedded `CHANNELS` data) — used server-side whenever the external API is unreachable (the code anticipates Cloudflare blocking server IPs) and client-side as a final fallback.
 3. **`public/api/fallback-schedule.json`** — a separately-editable JSON asset, used only by the Android APK's fully-offline path (`fetchLocalScheduleData()`/`loadLocalScheduleData()`), so offline channel content can be updated without a rebuild.
 
-**Important gap:** of the 9 channels in `CHANNELS` (`lib/schedule-utils.ts`), only `bangla-1` has real embedded program data. When any other channel's data is needed from tier 2 or 3, `getChannelPrograms()` silently substitutes Bangla content (flagged via a `channelUnavailable` boolean on the response, but nothing currently surfaces that in the UI — this was a deliberate product decision, not an oversight). If you're asked to expand offline coverage, this is where to look.
+**Channel ids and fallback coverage:** the player uses the numeric channel ids of the live `tv-channels` API (`1` = Bangla, `3` = English, …; mirrored in `DEFAULT_API_CHANNELS`), while `CHANNELS` (`lib/schedule-utils.ts`) uses local ids (`english-1`). `resolveLocalChannelId()` maps one to the other by language (`localizationId`) and Quran flag, and the player passes `lid`/`iq` to `/api/current-video` so the server asks the external API for the same schedule as the browser (`iq=true` is the API's Quran parameter). Of the 9 channels, `bangla-1`, `english-1` and `arabic-1` have embedded program data (with real YouTube durations: the broadcast math depends on them). For a channel without data, `getChannelPrograms()` substitutes a same-language channel (Quran - English → English), else Bangla, flagged via a `channelUnavailable` boolean on the response that nothing currently surfaces in the UI. Keep `public/api/fallback-schedule.json` in step with the embedded data. If you're asked to expand offline coverage, this is where to look.
+
+### Donation link
+
+`lib/donation.ts` picks the donation page from the selected channel's language only (never the visitor's location): Bangla (`localizationId` 5) → the Bangladesh/bKash page, any other language or no channel yet → the DIT Web USD/card form. Both the header `DonateButton` and the 3-dot menu's Donate use it.
 
 ### Player core
 

@@ -1,5 +1,7 @@
 /* tailwindcss */
 @import 'tailwindcss';
+/* The React Native app in this repo is not web markup: don't scan it for classes. */
+@source not "../deeni-tv-react-native-app";
 @import 'tw-animate-css';
 
 @custom-variant dark (&:is(.dark *));

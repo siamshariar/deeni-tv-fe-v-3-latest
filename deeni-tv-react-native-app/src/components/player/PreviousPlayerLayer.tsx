@@ -12,6 +12,7 @@ import {
   useTVEventHandler,
   type HWEvent,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
 import { CornerMasks } from '@/components/common/CornerMasks';
 import { Focusable } from '@/components/common/Focusable';
@@ -19,6 +20,7 @@ import { Gradient, PageGradient } from '@/components/common/Gradient';
 import { Logo } from '@/components/common/Logo';
 import { RoundButton } from '@/components/shell/RoundButton';
 import { useFrameLayout } from '@/hooks/useFrameLayout';
+import { fitBarMetrics } from '@/lib/playerLayout';
 import { youtubeFlags } from '@/lib/config';
 import { colors, fonts } from '@/lib/theme';
 import { formatTime } from '@/lib/time';
@@ -31,6 +33,7 @@ import { BrandedCover } from './Covers';
 import { YouTubeWebView } from './YouTubeWebView';
 
 const CONTROLS_HIDE_MS = 3500;
+const CONTROLS_HIDE_AFTER_START_MS = 5000;
 // TV hold-to-scrub on the seek bar.
 const SCRUB_TICK_MS = 150;
 const SCRUB_RAMP_MS = 3000;
@@ -52,13 +55,20 @@ export function PreviousPlayerLayer() {
   }, []);
 
   // Title / progress / pill (and the bar in fullscreen) hide after 3.5 s while playing.
+  // TV (always fullscreen): after the programme has started they stay 5 s the first time.
+  const afterStart = useRef(false);
   useEffect(() => {
     if (!s.isOpen) return;
     if (!s.isPlaying || s.isEnded || s.isLoading) {
+      if (s.isLoading && Platform.isTV) afterStart.current = true;
       if (!s.controlsVisible) usePreviousPlayerStore.setState({ controlsVisible: true });
       return;
     }
-    const t = setTimeout(() => usePreviousPlayerStore.setState({ controlsVisible: false }), CONTROLS_HIDE_MS);
+    const delay = afterStart.current ? CONTROLS_HIDE_AFTER_START_MS : CONTROLS_HIDE_MS;
+    const t = setTimeout(() => {
+      afterStart.current = false;
+      usePreviousPlayerStore.setState({ controlsVisible: false });
+    }, delay);
     return () => clearTimeout(t);
   }, [s.isOpen, s.isPlaying, s.isEnded, s.isLoading, s.controlsVisible, activity]);
 
@@ -362,21 +372,40 @@ function SeekBar({
     return Math.min(1, Math.max(0, x / widthRef.current));
   }
 
+  // TV focus works like YouTube on TV: no box around the bar; the bar itself
+  // grows (4 → 8) and the handle grows (12 → 20, with a soft halo). Same
+  // overall height either way (padding 8 + 4 + 8 = 6 + 8 + 6), so nothing moves.
+  const barH = (focused ? 8 : 4) * unit;
+  const knob = 20 * unit;
+  const halo = 32 * unit;
   const track = (
-    <View style={{ height: 4 * unit, borderRadius: 2 * unit, backgroundColor: 'rgba(255,255,255,0.3)' }}>
-      <View style={{ width: `${progress * 100}%`, height: '100%', borderRadius: 2 * unit, backgroundColor: colors.red600 }} />
-      <View
-        style={{
-          position: 'absolute',
-          left: `${progress * 100}%`,
-          top: -4 * unit,
-          width: 12 * unit,
-          height: 12 * unit,
-          marginLeft: -6 * unit,
-          borderRadius: 6 * unit,
-          backgroundColor: colors.white,
-        }}
-      />
+    <View style={{ height: barH, borderRadius: barH / 2, backgroundColor: focused ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.3)' }}>
+      <View style={{ width: `${progress * 100}%`, height: '100%', borderRadius: barH / 2, backgroundColor: colors.red600 }} />
+      {focused ? (
+        // SVG: Android draws rounded Views jagged on TV boxes.
+        <View
+          pointerEvents="none"
+          style={{ position: 'absolute', left: `${progress * 100}%`, top: (barH - halo) / 2, width: halo, height: halo, marginLeft: -halo / 2 }}
+        >
+          <Svg width={halo} height={halo}>
+            <Circle cx={halo / 2} cy={halo / 2} r={halo / 2} fill={colors.white} fillOpacity={0.22} />
+            <Circle cx={halo / 2} cy={halo / 2} r={knob / 2} fill={colors.white} />
+          </Svg>
+        </View>
+      ) : (
+        <View
+          style={{
+            position: 'absolute',
+            left: `${progress * 100}%`,
+            top: -4 * unit,
+            width: 12 * unit,
+            height: 12 * unit,
+            marginLeft: -6 * unit,
+            borderRadius: 6 * unit,
+            backgroundColor: colors.white,
+          }}
+        />
+      )}
     </View>
   );
 
@@ -394,7 +423,8 @@ function SeekBar({
         onBlur={() => setFocused(false)}
         onPress={() => previousPlayer.togglePlay()}
         accessibilityLabel="Seek bar. Left and right skip 10 seconds; hold to scrub."
-        style={{ paddingVertical: 8 * unit, borderRadius: 4, borderWidth: 2, borderColor: 'transparent' }}
+        style={{ paddingVertical: (focused ? 6 : 8) * unit }}
+        focusStyle={{}}
       >
         {track}
       </Focusable>
@@ -438,7 +468,20 @@ function TransportBar({
   const isEnded = usePreviousPlayerStore((st) => st.isEnded);
   const isMuted = usePreviousPlayerStore((st) => st.isMuted);
   const isOpen = usePreviousPlayerStore((st) => st.isOpen);
-  const { buttonSize, iconSize, unit } = layout;
+  const { unit } = layout;
+  // Web sizes, fitted to the bar's real width (framed: the frame; fullscreen: the window).
+  const { padX, gap, buttonSize, iconSize, logoHeight } = fitBarMetrics(
+    { kind: 'centred', centre: 3, right: Platform.isTV ? 2 : 3 },
+    fullscreen ? layout.windowWidth : layout.frameWidth,
+    {
+      padX: (layout.windowWidth >= 640 || layout.isTV ? 24 : 12) * unit,
+      gap: 6 * unit,
+      buttonSize: layout.buttonSize,
+      iconSize: layout.iconSize,
+      logoHeight: layout.logoHeight,
+    },
+    unit,
+  );
   const playRef = useRef<View>(null);
   // TV: Play/Pause takes focus when the player opens. The Previous list row
   // that had focus unmounts in the same moment, and Android TV drops a focus
@@ -464,7 +507,7 @@ function TransportBar({
     fn();
   };
   const centre = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 * unit }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap }}>
       <RoundButton focusable={!hidden} icon={RotateCcw} label="Back 10 seconds" size={buttonSize} iconSize={iconSize} onPress={act(() => previousPlayer.skip(-SKIP_SECONDS))} onFocus={onActivity} />
       <RoundButton
         focusable={!hidden}
@@ -481,24 +524,28 @@ function TransportBar({
     </View>
   );
   const right = (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 * unit }}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap }}>
       <RoundButton focusable={!hidden} icon={isMuted ? VolumeX : Volume2} label={isMuted ? 'Unmute' : 'Mute'} size={buttonSize} iconSize={iconSize} onPress={act(() => previousPlayer.toggleMute())} onFocus={onActivity} />
-      <RoundButton
-        focusable={!hidden}
-        icon={fullscreen ? Minimize : Maximize}
-        label={fullscreen ? 'Exit full screen' : 'Full screen'}
-        size={buttonSize}
-        iconSize={iconSize}
-        onPress={act(() => setPreviousFullscreen(!fullscreen))}
-        onFocus={onActivity}
-      />
+      {/* TV is always fullscreen: no Full screen button there. */}
+      {Platform.isTV ? null : (
+        <RoundButton
+          focusable={!hidden}
+          icon={fullscreen ? Minimize : Maximize}
+          label={fullscreen ? 'Exit full screen' : 'Full screen'}
+          size={buttonSize}
+          iconSize={iconSize}
+          onPress={act(() => setPreviousFullscreen(!fullscreen))}
+          onFocus={onActivity}
+        />
+      )}
       <RoundButton focusable={!hidden} icon={X} label="Close" size={buttonSize} iconSize={iconSize} onPress={() => previousPlayer.close()} onFocus={onActivity} />
     </View>
   );
   const row = (
     <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
       <View style={{ flex: 1 }}>
-        <Logo height={layout.logoHeight} style={{ maxWidth: '90%' }} />
+        {/* Sized by fitBarMetrics, so it never has to shrink to make room. */}
+        <Logo height={logoHeight} />
       </View>
       {centre}
       <View style={{ flex: 1, alignItems: 'flex-end' }}>{right}</View>
@@ -521,11 +568,11 @@ function TransportBar({
               // Web fullscreen: no band or border; the layer's gradient is the background,
               // edge to edge.
               height: layout.barHeight,
-              paddingHorizontal: (layout.windowWidth >= 640 || layout.isTV ? 24 : 12) * unit,
+              paddingHorizontal: padX,
             }
           : {
               height: layout.barHeight,
-              paddingHorizontal: (layout.windowWidth >= 640 || layout.isTV ? 24 : 12) * unit,
+              paddingHorizontal: padX,
               backgroundColor: colors.black60,
               borderColor: colors.border10,
               borderWidth: 1,

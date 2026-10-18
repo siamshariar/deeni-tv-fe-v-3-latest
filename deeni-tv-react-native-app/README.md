@@ -17,6 +17,7 @@ Android TV app (follows the web's desktop view). The plan this follows is
 | WebView | `react-native-webview` 13.16.1 (Expo-bundled) |
 | Storage | `expo-sqlite/kv-store` (synchronous key-value; TV-supported Expo module) |
 | State | `zustand` 5 |
+| Animation | `react-native-reanimated` 4.5.1 + `react-native-worklets` **0.10.4** (SDK 57 pins 0.10.1; 0.10.4 pauses its frame queue in the background, which cut ~10 % background CPU on the TV box, 2026-10-18; excluded from `expo install --check` in `package.json`) |
 
 **Spike result:** the TV debug build (armeabi-v7a) builds and runs on a TX20Pro
 Android TV box (Android 9 / API 28, HiSilicon, Chrome 66 WebView): `Platform.isTV`

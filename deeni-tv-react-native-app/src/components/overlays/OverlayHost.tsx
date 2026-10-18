@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
-import { BackHandler, StyleSheet, View } from 'react-native';
+import { BackHandler, StyleSheet, ToastAndroid, View } from 'react-native';
 
 import { previousPlayer } from '@/player/previousController';
-import { setMainFullscreen, setPreviousFullscreen } from '@/player/fullscreen';
+import { ALWAYS_FULLSCREEN, setMainFullscreen, setPreviousFullscreen } from '@/player/fullscreen';
 import { usePreviousPlayerStore } from '@/store/usePreviousPlayerStore';
 import { useUiStore, type OverlayId } from '@/store/useUiStore';
 
@@ -52,13 +52,19 @@ export function OverlayHost() {
  * Previous player fullscreen → Previous player → top overlay → main
  * fullscreen → leave the app. The mandatory first-visit picker can't be
  * closed: Back there leaves the app. The web had no Back handling at all.
+ * TV (always fullscreen) on the live screen: Back is a key like any other and
+ * shows the bar; leaving takes a second Back within 2.5 s ("Press Back again
+ * to exit"), so one stray press never drops the viewer out of the broadcast.
  */
+const EXIT_CONFIRM_MS = 2500;
 export function useBackHandler(): void {
   useEffect(() => {
+    let lastBackAt = 0;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
       const prev = usePreviousPlayerStore.getState();
       if (prev.isOpen) {
-        if (prev.isFullscreen) setPreviousFullscreen(false);
+        // TV is always fullscreen: Back closes the player.
+        if (prev.isFullscreen && !ALWAYS_FULLSCREEN) setPreviousFullscreen(false);
         else previousPlayer.close();
         return true;
       }
@@ -69,8 +75,19 @@ export function useBackHandler(): void {
         ui.close(top);
         return true;
       }
-      if (ui.isFullscreen) {
+      if (ui.isFullscreen && !ALWAYS_FULLSCREEN) {
         setMainFullscreen(false);
+        return true;
+      }
+      if (ALWAYS_FULLSCREEN) {
+        const now = Date.now();
+        if (now - lastBackAt < EXIT_CONFIRM_MS) {
+          lastBackAt = 0;
+          return false;
+        }
+        lastBackAt = now;
+        ui.showFsControls();
+        ToastAndroid.show('Press Back again to exit', ToastAndroid.SHORT);
         return true;
       }
       return false;

@@ -1,7 +1,6 @@
 import { Image, PixelRatio, type ImageSourcePropType, type ImageStyle, type StyleProp } from 'react-native';
 
-/** DeeniTV-V-2.png aspect ratio (3033×595), the wordmark the web uses in its bar and covers. */
-const ASPECT = 3033 / 595;
+import { LOGO_ASPECT as ASPECT } from '@/lib/playerLayout';
 
 /**
  * The wordmark pre-scaled (Lanczos, from the web's 3033×595 original) to the

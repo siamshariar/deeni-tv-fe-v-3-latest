@@ -4,6 +4,7 @@ import { Platform, StyleSheet, TVFocusGuideView, View, type StyleProp, type View
 
 import { Logo } from '@/components/common/Logo';
 import type { FrameLayout } from '@/hooks/useFrameLayout';
+import { fitBarMetrics } from '@/lib/playerLayout';
 import { colors } from '@/lib/theme';
 import { openChannelModal, openPreviousList, openSchedule, refreshBroadcast } from '@/player/actions';
 import { broadcast } from '@/player/broadcastController';
@@ -15,7 +16,8 @@ import { RoundButton } from './RoundButton';
 /**
  * The bar under the live video (web W-04): Deeni.tv logo left; right, in
  * order: Volume, Programs Schedule, Watched Program, Channel, Refresh,
- * Full screen, Menu. Labels are the web's `title` texts.
+ * Full screen, Menu. Labels are the web's `title` texts. TV is always
+ * fullscreen, so its bar has no Full screen button.
  */
 export function ControlBar({
   layout,
@@ -38,9 +40,21 @@ export function ControlBar({
 }) {
   const isMuted = useBroadcastStore((s) => s.isMuted);
   const volumeLocked = useBroadcastStore((s) => s.volumeLocked);
-  const { buttonSize, iconSize, unit, size } = layout;
+  const { unit, size } = layout;
   const compact = size === 'mobile';
-  const gap = (compact ? 2 : 6) * unit;
+  // Web sizes, fitted to the bar's real width (framed: the frame; fullscreen: the window).
+  const { padX, gap, buttonSize, iconSize, logoHeight } = fitBarMetrics(
+    { kind: 'row', buttons: Platform.isTV ? 6 : 7 },
+    fullscreen ? layout.windowWidth : layout.frameWidth,
+    {
+      padX: (layout.windowWidth >= 640 || layout.isTV ? 24 : 12) * unit,
+      gap: (compact ? 2 : 6) * unit,
+      buttonSize: layout.buttonSize,
+      iconSize: layout.iconSize,
+      logoHeight: layout.logoHeight,
+    },
+    unit,
+  );
 
   // TV: focus returns to the button that opened an overlay (Channel by default, plan D-33).
   const [lastFocused, setLastFocused] = useState('channel');
@@ -81,14 +95,16 @@ export function ControlBar({
         {...focusProps('channel')}
       />
       <RoundButton icon={RefreshCw} label="Refresh" size={buttonSize} iconSize={iconSize} onPress={act(refreshBroadcast)} {...focusProps('refresh')} />
-      <RoundButton
-        icon={fullscreen ? Minimize : Maximize}
-        label={fullscreen ? 'Exit full screen' : 'Full screen'}
-        size={buttonSize}
-        iconSize={iconSize}
-        onPress={act(onToggleFullscreen)}
-        {...focusProps('fullscreen')}
-      />
+      {Platform.isTV ? null : (
+        <RoundButton
+          icon={fullscreen ? Minimize : Maximize}
+          label={fullscreen ? 'Exit full screen' : 'Full screen'}
+          size={buttonSize}
+          iconSize={iconSize}
+          onPress={act(onToggleFullscreen)}
+          {...focusProps('fullscreen')}
+        />
+      )}
       <RoundButton
         icon={MoreHorizontal}
         label="Menu"
@@ -106,7 +122,7 @@ export function ControlBar({
         styles.bar,
         {
           height: layout.barHeight,
-          paddingHorizontal: (layout.windowWidth >= 640 || layout.isTV ? 24 : 12) * unit,
+          paddingHorizontal: padX,
         },
         // Framed: the web's frame border on the sides and bottom, rounded bottom
         // corners. Fullscreen: no border props at all — even 0-width overrides
@@ -116,7 +132,8 @@ export function ControlBar({
         style,
       ]}
     >
-      <Logo height={layout.logoHeight} style={{ flexShrink: 1, maxWidth: '40%' }} />
+      {/* Sized by fitBarMetrics, so it never has to shrink to make room. */}
+      <Logo height={logoHeight} style={{ flexShrink: 0 }} />
       {Platform.isTV ? (
         <TVFocusGuideView autoFocus trapFocusLeft trapFocusRight>
           {buttons}

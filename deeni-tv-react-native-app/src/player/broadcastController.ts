@@ -8,7 +8,9 @@
  * - start at the live offset (seekTo + time since the schedule was fetched)
  * - muted start, unmute on the first frame; volume locked until then
  * - branded cover until ≥3 s of real movement; stall cover after 1.2 s frozen
- * - auto-advance at the end, post-transition queue alignment, 60 s sync
+ * - auto-advance at the end, post-transition queue alignment, 60 s sync; deviation:
+ *   programme changes keep the broadcast's clock (switch at the scheduled end, the
+ *   next programme at its live position, the API's seekTo corrects the timing)
  * - load timeout (20 s → one retry → "Failed to Load"), 12 s start watchdog,
  *   stall ladder (play → seek nudge → reload, 25 s cooldown)
  * - rejoin live after the Previous player closes and when the app returns
@@ -18,7 +20,7 @@ import { Platform } from 'react-native';
 import { fetchExternalSchedule, fetchWebRouteSchedule } from '@/lib/api/client';
 import { isUsableSchedule } from '@/lib/api/normalize';
 import { youtubeFlags } from '@/lib/config';
-import { alignQueue, embeddedQueueAfter, upcomingFromSchedule } from '@/lib/schedule/queue';
+import { alignQueue, embeddedQueueAfter, periodicQueue, upcomingFromSchedule } from '@/lib/schedule/queue';
 import { buildLocalCurrentVideoResponse, toVideoProgram } from '@/lib/schedule/schedule';
 import { addToPreviousVideos, getPreviousVideos, savePreviousVideos } from '@/lib/storage';
 import { playerCommand, type PlayerPageMessage } from '@/lib/youtube/playerPage';
@@ -37,22 +39,43 @@ const COVER_TICK_MS = 300;
 const SYNC_INTERVAL_MS = 60000;
 const NO_NEXT_RELOAD_MS = 20000;
 const POST_TRANSITION_SYNC_MS = 500;
-const COVER_MIN_MOVE_MS = 3000;
+// TV: YouTube's start overlay (title bar, pause glyph, "More videos") was still up after
+// 3 s of playback on the box (recorded frames), so TV waits 5 s, like the Watched player.
+const COVER_MIN_MOVE_MS = Platform.isTV ? 5000 : 3000;
 // After a stall, YouTube shows its own controls (title bar, play glyph, "More videos")
-// for ~3 s once playback resumes. TV waits that out like the start cover; the phone
-// keeps the web's 0.6 s.
-const COVER_MIN_MOVE_AFTER_STALL_MS = Platform.isTV ? 3000 : 600;
+// for ~3 s once playback resumes, on the TV box and on the phone. Both wait that out
+// like the start cover (deviation: the web uses 0.6 s).
+const COVER_MIN_MOVE_AFTER_STALL_MS = 3000;
 const STALL_COVER_MS = 1200;
 const REJOIN_DRIFT_S = 20;
 const REJOIN_API_WAIT_MS = 8000;
 const START_CORRECTION_S = 5;
+// Catch-up seeks per cover. When every seek buffers for longer than 5 s (a loaded TV
+// box, a slow line; seeks took ~14 s on the test box while screen recording), the
+// video is behind again by the time it has moved 3 s, and an uncapped catch-up could
+// keep the cover up for good.
+const MAX_COVER_CATCH_UPS = 2;
+// Live broadcast across programme changes (product request, 2026-10-18; deviation: the
+// web starts the next programme at 0). The web way added each load time to the lag, and
+// nothing caught up: the TV box was ~23 s behind the broadcast after one change. Now a
+// change keeps the broadcast's clock: when the schedule says what plays has ended, the
+// player switches (this grace after it, so a video on time ends by itself), and the next
+// programme starts at its live position.
+const SCHEDULE_SWITCH_GRACE_MS = 1500;
+/** The next programme with less than this left in the broadcast is skipped: rejoin live instead. */
+const NEXT_MIN_LEFT_S = 3;
 
 export const LOAD_TIMEOUT_MESSAGE = 'Playback is taking longer than expected. Please tap Refresh.';
 
 const PENDING = Symbol('pending');
 const delay = (ms: number) => new Promise<typeof PENDING>((resolve) => setTimeout(() => resolve(PENDING), ms));
 
-type LoadOptions = { prefetched?: ScheduleResult; isRecoveryRetry?: boolean };
+type LoadOptions = {
+  prefetched?: ScheduleResult;
+  isRecoveryRetry?: boolean;
+  /** Started by the viewer (app open, channel switch, Refresh, back from the Watched player): TV holds the bar up. */
+  userStart?: boolean;
+};
 
 class BroadcastController {
   readonly engine = new EngineRef();
@@ -78,12 +101,16 @@ class BroadcastController {
   private liveTarget: { position: number; at: number } | null = null;
   /**
    * Where the current video is in the broadcast at `at` (schedule start, a programme
-   * switch, a rejoin). Used to catch up after a stall: on TV boxes the video often
-   * buffers again right after the first frame, and that time was never made up.
+   * switch, a rejoin, every sync naming it). Used to catch up after a stall (on TV boxes
+   * the video often buffers again right after the first frame, and that time was never
+   * made up) and to find the programme's scheduled end. Negative when the programme is
+   * due later (the previous one ended early).
    */
   private liveAnchor: { videoId: string; position: number; at: number } | null = null;
-  /** The cover up now is the start cover of a channel load (not a programme switch). */
+  /** The cover up now is a start cover (channel load or programme change): catch up before it lifts. */
   private startCover = false;
+  /** Catch-up seeks made while the current cover is up (MAX_COVER_CATCH_UPS). */
+  private coverCatchUps = 0;
 
   // stall ladder
   private playerState = -1;
@@ -124,7 +151,7 @@ class BroadcastController {
   /** First start or channel switch (always tries to start with sound, like the web). */
   selectChannel(channelId: string): void {
     useChannelStore.getState().select(channelId);
-    void this.loadChannel(channelId);
+    void this.loadChannel(channelId, { userStart: true });
   }
 
   /** Refresh / Try Again: the current programme goes into history, then reload (web handleReload). */
@@ -134,7 +161,7 @@ class BroadcastController {
     if (currentProgram) {
       useBroadcastStore.setState({ history: addToPreviousVideos(channelId, currentProgram) });
     }
-    void this.loadChannel(channelId);
+    void this.loadChannel(channelId, { userStart: true });
   }
 
   toggleMute(): void {
@@ -169,6 +196,8 @@ class BroadcastController {
       errorMessage: null,
       coverVisible: false,
       videoVisible: false,
+      // Automatic reloads keep whatever the bar was doing.
+      videoStarting: options.userStart ? true : useBroadcastStore.getState().videoStarting,
       volumeLocked: true,
       isMuted: true,
       unavailableUntil: null,
@@ -217,11 +246,14 @@ class BroadcastController {
     }
 
     const elapsed = Math.max(0, (Date.now() - scheduleAt) / 1000);
-    const start = Math.min(result.currentProgram.seekTo + elapsed, Math.max(0, program.duration - 2));
+    const live = result.currentProgram.seekTo + elapsed;
+    const start = Math.min(live, Math.max(0, program.duration - 2));
     this.liveTarget = { position: start, at: Date.now() };
     this.expectedId = program.videoId;
-    this.liveAnchor = { videoId: program.videoId, position: start, at: Date.now() };
+    // Unclamped: near its end the programme's scheduled end must stay exact.
+    this.liveAnchor = { videoId: program.videoId, position: live, at: Date.now() };
     this.startCover = true;
+    this.coverCatchUps = 0;
 
     useBroadcastStore.setState({
       phase: 'branded',
@@ -266,7 +298,9 @@ class BroadcastController {
         if (msg.id === this.expectedId) this.onNearEnd();
         break;
       case 'end':
-        if (msg.id === this.expectedId) this.playNextVideo();
+        // Not before the programme has played: a late end of the previous video
+        // must not skip the one that just started (deviation; the web has no guard).
+        if (msg.id === this.expectedId && this.firstFrameSeen) this.playNextVideo();
         break;
       case 'error':
         if (msg.code === 0 || msg.id === this.expectedId) this.onPlayerError(msg.code);
@@ -334,7 +368,9 @@ class BroadcastController {
     if (!youtubeFlags.coverEndScreen) return;
     const { nextProgram, currentProgram } = useBroadcastStore.getState();
     this.endCover = true;
-    useBroadcastStore.setState({ coverVisible: true, coverTitle: (nextProgram ?? currentProgram)?.title ?? '' });
+    // TV covers the last 20 s, while the programme is still on: show its own title.
+    const shown = Platform.isTV ? (currentProgram ?? nextProgram) : (nextProgram ?? currentProgram);
+    useBroadcastStore.setState({ coverVisible: true, coverTitle: shown?.title ?? '' });
   }
 
   private onPlayerError(code: number): void {
@@ -387,15 +423,29 @@ class BroadcastController {
       return;
     }
 
-    this.transitioning = true;
+    // How far the broadcast already is into the next programme: it began when this
+    // one's scheduled time ended. Negative when this video ended early.
+    const endAt = this.scheduledEndAt();
+    const late = endAt === null ? 0 : (Date.now() - endAt) / 1000;
     const history = addToPreviousVideos(channelId, currentProgram);
+    if (late > nextProgram.duration - NEXT_MIN_LEFT_S) {
+      // The broadcast has moved past the next programme as well: rejoin it.
+      void this.loadChannel(channelId);
+      return;
+    }
+
+    this.transitioning = true;
     let upcoming = state.upcoming.slice(1);
     if (!upcoming[0]) upcoming = embeddedQueueAfter(channelId, nextProgram);
 
     this.resetPlaybackTracking();
+    const start = Math.max(0, late);
+    const now = Date.now();
     this.expectedId = nextProgram.videoId;
-    this.liveAnchor = { videoId: nextProgram.videoId, position: 0, at: Date.now() };
-    this.startCover = false; // a new programme starts at 0 (web), no catch-up
+    this.liveAnchor = { videoId: nextProgram.videoId, position: late, at: now };
+    this.liveTarget = { position: late, at: now };
+    this.startCover = true; // its load time is caught up before the picture shows
+    this.coverCatchUps = 0;
     this.pendingUnmute = youtubeFlags.autoUnmute && !this.userMuted;
     useBroadcastStore.setState({
       phase: 'branded',
@@ -406,11 +456,11 @@ class BroadcastController {
       coverVisible: true,
       coverTitle: nextProgram.title,
       volumeLocked: true,
-      currentTime: 0,
+      currentTime: start,
       duration: nextProgram.duration,
     });
     // Every switch is muted until the new video plays (web transition mute).
-    this.engine.run(playerCommand.load(nextProgram.videoId, 0, true, true));
+    this.engine.run(playerCommand.load(nextProgram.videoId, start, true, true));
     if (this.previousActive) this.applyPreviousMode();
     this.transitioning = false;
 
@@ -418,6 +468,35 @@ class BroadcastController {
     setTimeout(() => {
       if (attempt === this.attempt) void this.syncAfterTransition(channelId);
     }, POST_TRANSITION_SYNC_MS);
+  }
+
+  /** When what plays ends in the broadcast (client clock, ms), from its live anchor; null if unknown. */
+  private scheduledEndAt(): number | null {
+    const anchor = this.liveAnchor;
+    const program = useBroadcastStore.getState().currentProgram;
+    if (!anchor || !program || anchor.videoId !== program.videoId || !(program.duration > 0)) return null;
+    return anchor.at + (program.duration - anchor.position) * 1000;
+  }
+
+  /**
+   * Take the live position of what plays from a schedule that names it: seekTo plus the
+   * time since it was fetched. A channel started from the API takes timing only from the
+   * API (the fallbacks follow another playlist); a fallback channel from any tier (they
+   * compute the same embedded schedule). `seekNow`: when the picture is up and more than
+   * 5 s off, jump there at once; under a cover the catch-up before it lifts does it.
+   */
+  private adoptLiveTiming(result: ScheduleResult, seekNow: boolean): void {
+    if (result._source !== 'external-api' && this.source === 'external-api') return;
+    const at = Date.now();
+    const position = (result.currentProgram.seekTo || 0) + Math.max(0, at - (result._fetchedAt ?? at)) / 1000;
+    this.liveAnchor = { videoId: this.expectedId, position, at };
+    if (this.liveTarget) this.liveTarget = { position, at };
+    if (!seekNow || !this.firstFrameSeen || this.lastTime < 0) return;
+    const { coverVisible, duration } = useBroadcastStore.getState();
+    if (coverVisible || Math.abs(position - this.lastTime) <= START_CORRECTION_S) return;
+    if (duration > 0 && position >= duration - 3) return;
+    this.engine.run(playerCommand.seek(position));
+    this.movingSince = 0;
   }
 
   private async fetchScheduleChain(channelId: string): Promise<ScheduleResult> {
@@ -429,6 +508,7 @@ class BroadcastController {
   /** Right after a switch: align the queue with what the API reports (web syncImmediateAfterTransition). */
   private async syncAfterTransition(channelId: string): Promise<void> {
     const attempt = this.attempt;
+    const playing = this.expectedId;
     const result = await this.fetchScheduleChain(channelId);
     if (attempt !== this.attempt) return;
     const latestHistory = getPreviousVideos(channelId);
@@ -440,25 +520,35 @@ class BroadcastController {
       const patch: Partial<ReturnType<typeof useBroadcastStore.getState>> = { upcoming: aligned.upcoming };
       if (aligned.upcoming[0]) patch.nextProgram = aligned.upcoming[0];
       useBroadcastStore.setState(patch);
+      // The schedule names the programme that just started: its position is the live one
+      // (the API's seekTo is authoritative; programmes may have gaps or other lengths).
+      if (playing === this.expectedId && result.currentProgram?.ytVideoId === playing) this.adoptLiveTiming(result, true);
     } else if (aligned.kind === 'rejoin') {
       void this.loadChannel(channelId, { prefetched: result });
     }
   }
 
-  /** Every 60 s: refresh the upcoming queue only; drift correction stays off (web). */
+  /**
+   * Every 60 s: refresh the upcoming queue, and the live anchor when the schedule names
+   * what plays (so the next change happens at the broadcast's time). No seek mid-programme:
+   * drift correction stays off (web); programme changes and stall covers catch up.
+   */
   private async periodicSync(): Promise<void> {
     const { channelId, phase } = useBroadcastStore.getState();
     if (!channelId || !this.channelPlayed || phase === 'error' || this.backgrounded) return;
     const attempt = this.attempt;
+    const playing = this.expectedId;
     const result = await this.fetchScheduleChain(channelId);
     if (attempt !== this.attempt) return;
+    if (playing === this.expectedId && result.currentProgram?.ytVideoId === playing) this.adoptLiveTiming(result, false);
     const latestHistory = getPreviousVideos(channelId);
     if (latestHistory.length > 0) useBroadcastStore.setState({ history: latestHistory });
 
     const state = useBroadcastStore.getState();
     const local = state.currentProgram?.videoId ?? '';
-    const mapped = upcomingFromSchedule(result, channelId, local);
-    if (state.upcoming.length === 0 || mapped.length > 0) {
+    // null: the schedule has moved past what plays (we lag after a change); keep the queue.
+    const mapped = periodicQueue(result, channelId, local);
+    if (mapped && (state.upcoming.length === 0 || mapped.length > 0)) {
       const patch: Partial<ReturnType<typeof useBroadcastStore.getState>> = { upcoming: mapped };
       if (mapped[0]) patch.nextProgram = mapped[0];
       useBroadcastStore.setState(patch);
@@ -521,10 +611,18 @@ class BroadcastController {
     const { channelId } = useBroadcastStore.getState();
     if (Platform.isTV) {
       // The live player was stopped to free the decoder: rejoin live.
-      if (channelId) void this.loadChannel(channelId);
+      if (channelId) void this.loadChannel(channelId, { userStart: true });
       return;
     }
     // Web onResumeMainPlayer: release the hold, unmute, play, re-apply, rejoin.
+    // Resuming (and the rejoin seek) brings up YouTube's title bar and play glyph for
+    // a few seconds: the stall cover hides them until it has moved 3 s (coverTick).
+    if (this.firstFrameSeen) {
+      this.stallCover = true;
+      this.movingSince = 0;
+      const { currentProgram, coverTitle } = useBroadcastStore.getState();
+      useBroadcastStore.setState({ coverVisible: true, coverTitle: currentProgram?.title ?? coverTitle });
+    }
     this.watchTime = Math.max(0, this.lastTime);
     this.watchAt = Date.now();
     this.bufferingSince = 0;
@@ -563,6 +661,19 @@ class BroadcastController {
     if (!this.backgrounded) return;
     this.backgrounded = false;
     if (this.previousActive && Platform.isTV) return;
+    if (Platform.isTV) {
+      // Reopening the app is a viewer-started load: the bar stays up until the
+      // video moves again (the cover also hides YouTube's paused screen meanwhile).
+      if (this.firstFrameSeen) {
+        this.stallCover = true;
+        this.movingSince = 0;
+      }
+      const { currentProgram, coverTitle } = useBroadcastStore.getState();
+      useBroadcastStore.setState({
+        videoStarting: true,
+        ...(this.firstFrameSeen ? { coverVisible: true, coverTitle: currentProgram?.title ?? coverTitle } : null),
+      });
+    }
     const { isMuted } = useBroadcastStore.getState();
     this.engine.run(playerCommand.play());
     if (!this.previousActive) this.engine.run(playerCommand.mute(isMuted));
@@ -575,9 +686,11 @@ class BroadcastController {
   private catchUpAfterStall(now: number, duration: number): boolean {
     const anchor = this.liveAnchor;
     if (!anchor || anchor.videoId !== this.expectedId || this.lastTime < 0) return false;
+    if (this.coverCatchUps >= MAX_COVER_CATCH_UPS) return false;
     const target = anchor.position + (now - anchor.at) / 1000;
     if (target - this.lastTime <= START_CORRECTION_S || (duration > 0 && target >= duration - 3)) return false;
     if (__DEV__) console.log('[live] catch up after stall', Math.round(target - this.lastTime), 's');
+    this.coverCatchUps += 1;
     this.engine.run(playerCommand.seek(target));
     this.movingSince = 0;
     return true;
@@ -602,6 +715,13 @@ class BroadcastController {
     const state = useBroadcastStore.getState();
     if (state.phase !== 'playing') return;
     const now = Date.now();
+    // The broadcast has moved on while this video is still behind (slow start, stall):
+    // switch now, like a live channel, rather than finish late.
+    const endAt = this.scheduledEndAt();
+    if (endAt !== null && now >= endAt + SCHEDULE_SWITCH_GRACE_MS && !this.transitioning) {
+      this.playNextVideo();
+      return;
+    }
     const buffering = this.playerState === 3 && this.coverBufferingSince > 0 && now - this.coverBufferingSince > STALL_COVER_MS;
     if (now - this.lastMoveAt > STALL_COVER_MS || buffering) this.movingSince = 0;
     if (state.coverVisible) {
@@ -614,7 +734,8 @@ class BroadcastController {
         if ((this.stallCover || this.startCover) && this.catchUpAfterStall(now, state.duration)) return;
         this.stallCover = false;
         this.startCover = false;
-        useBroadcastStore.setState({ coverVisible: false });
+        this.coverCatchUps = 0;
+        useBroadcastStore.setState({ coverVisible: false, videoStarting: false });
       }
     } else if (youtubeFlags.coverAfterLoad && (now - this.lastMoveAt > STALL_COVER_MS || buffering)) {
       this.stallCover = true;

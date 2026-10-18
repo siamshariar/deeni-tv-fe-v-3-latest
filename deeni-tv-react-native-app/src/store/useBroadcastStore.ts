@@ -30,6 +30,11 @@ interface BroadcastState {
   coverTitle: string;
   /** The WebView may be shown (after the first real movement; web iframeVisible). */
   videoVisible: boolean;
+  /**
+   * A channel the viewer started is loading: from the load until its start cover
+   * lifts (not set by automatic changes: next programme, recovery). TV keeps the bar up meanwhile.
+   */
+  videoStarting: boolean;
   /** Seconds into the programme / its duration, from the player. */
   currentTime: number;
   duration: number;
@@ -51,6 +56,7 @@ export const initialBroadcastState: BroadcastState = {
   coverVisible: false,
   coverTitle: '',
   videoVisible: false,
+  videoStarting: false,
   currentTime: 0,
   duration: 0,
   volumeLocked: true,

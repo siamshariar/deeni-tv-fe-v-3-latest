@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View, useTVEventHandler } from 'react-native';
 
 import { CornerMasks } from '@/components/common/CornerMasks';
@@ -16,13 +16,15 @@ import { useFrameLayout } from '@/hooks/useFrameLayout';
 import { colors } from '@/lib/theme';
 import { openChannelModal, refreshBroadcast, refreshChannelListInBackground } from '@/player/actions';
 import { broadcast } from '@/player/broadcastController';
-import { toggleMainFullscreen } from '@/player/fullscreen';
+import { onPhoneOrientation, toggleMainFullscreen } from '@/player/fullscreen';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { useChannelStore } from '@/store/useChannelStore';
 import { usePreviousPlayerStore } from '@/store/usePreviousPlayerStore';
 import { useUiStore } from '@/store/useUiStore';
 
 const FS_CONTROLS_HIDE_MS = 3500;
+// TV: after a channel or programme has started, the bar stays a little longer before hiding.
+const FS_HIDE_AFTER_START_MS = 5000;
 
 /**
  * The one screen (web app/page.tsx): the live player in its frame with the
@@ -40,30 +42,55 @@ export default function LiveScreen() {
   const errorMessage = useBroadcastStore((s) => s.errorMessage);
   const previousOpen = usePreviousPlayerStore((s) => s.isOpen);
   const previousFullscreen = usePreviousPlayerStore((s) => s.isFullscreen);
+  const videoStarting = useBroadcastStore((s) => s.videoStarting);
 
   useBackHandler();
   useKeepAwake();
 
+  // Phones: turning the phone sideways opens fullscreen, turning it upright leaves it
+  // (YouTube app; see player/fullscreen.ts). Tablets (short side ≥ 600 dp) and TV keep their layouts.
+  const isPhone = !Platform.isTV && Math.min(layout.windowWidth, layout.windowHeight) < 600;
+  const isLandscape = layout.windowWidth > layout.windowHeight;
+  useEffect(() => {
+    if (isPhone) onPhoneOrientation(isLandscape);
+  }, [isPhone, isLandscape, previousOpen]);
+
   // First visit → mandatory channel picker; returning visitor → auto-start.
   useEffect(() => {
     const saved = useChannelStore.getState().selectedId;
-    if (saved) void broadcast.loadChannel(saved);
+    if (saved) void broadcast.loadChannel(saved, { userStart: true });
     else useUiStore.getState().open('channels-first');
     refreshChannelListInBackground();
   }, []);
 
-  // Fullscreen: the bar hides after 3.5 s; a tap or any remote key shows it.
-  const [activity, setActivity] = useState(0);
-  const bump = useCallback(() => {
-    useUiStore.getState().setFsControlsVisible(true);
-    setActivity((n) => n + 1);
-  }, []);
+  // Fullscreen: the bar hides after 3.5 s; a tap or any remote key shows it
+  // (Back too: see useBackHandler).
+  const fsActivity = useUiStore((s) => s.fsActivity);
+  const bump = useCallback(() => useUiStore.getState().showFsControls(), []);
+  // TV (always fullscreen), like other TV players: while a channel the viewer
+  // started is loading (app open, channel switch, Refresh, back from the Watched
+  // player) the bar stays up, then hides 5 s after the video appears, later 3.5 s
+  // after the last key. Automatic changes (the next programme, a recovery reload)
+  // leave the bar as it is: hidden stays hidden. Phones keep the plain 3.5 s timer.
+  const holdBar = Platform.isTV && videoStarting;
+  const afterStart = useRef(false);
   useEffect(() => {
     if (!isFullscreen || overlayCount > 0) return;
-    const t = setTimeout(() => useUiStore.getState().setFsControlsVisible(false), FS_CONTROLS_HIDE_MS);
+    if (holdBar) {
+      afterStart.current = true;
+      useUiStore.getState().setFsControlsVisible(true);
+      return;
+    }
+    const delay = afterStart.current ? FS_HIDE_AFTER_START_MS : FS_CONTROLS_HIDE_MS;
+    const t = setTimeout(() => {
+      afterStart.current = false;
+      useUiStore.getState().setFsControlsVisible(false);
+    }, delay);
     return () => clearTimeout(t);
-  }, [isFullscreen, activity, overlayCount]);
-  useTVEventHandler(() => {
+  }, [isFullscreen, fsActivity, overlayCount, holdBar]);
+  useTVEventHandler((evt) => {
+    // Focus moves arrive here too; only real remote keys count.
+    if (evt.eventType === 'focus' || evt.eventType === 'blur') return;
     if (useUiStore.getState().isFullscreen) bump();
   });
 

@@ -208,7 +208,10 @@ export function buildPlayerHtml(config: PlayerPageConfig): string {
       sendFirstFrame();
       applyMute();
     }
-    if (e.data === 0 && S.expected && !S.endSent) {
+    // ENDED only for the video on screen that has played: on a slow TV box the
+    // previous video's ENDED arrived after the next one was loaded and skipped
+    // that whole programme.
+    if (e.data === 0 && S.expected && !S.endSent && S.firstSent && match) {
       S.endSent = true;
       post({ type: 'end', id: S.expected });
     }

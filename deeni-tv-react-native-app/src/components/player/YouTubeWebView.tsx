@@ -35,7 +35,9 @@ export function YouTubeWebView({ engine, role, onMessage, style }: Props) {
         origin: config.playerOrigin,
         host: config.youtubeHost,
         role,
-        nearEndSec: role === 'live' ? 3 : 0,
+        // TV: YouTube end screens (suggested-video cards) start up to 20 s before the
+        // end; the live player covers that stretch. Phones keep 3 s.
+        nearEndSec: role === 'live' ? (Platform.isTV ? 20 : 3) : 0,
         endSec: role === 'live' ? 0.5 : 0.3,
       }),
       baseUrl: `${config.playerOrigin}/`,

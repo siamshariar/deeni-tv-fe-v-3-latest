@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 
 import { config } from '@/lib/config';
 import { findApiChannel } from '@/lib/schedule/channels';
-import { noteServerDate } from '@/lib/serverClock';
+import { noteServerDate, serverNow } from '@/lib/serverClock';
 import type { ApiChannel, ScheduleResult } from '@/types';
 
 import { createApiToken } from './jwt';
@@ -31,7 +31,17 @@ function authHeaders(): Record<string, string> {
     }
     return {};
   }
-  return { p: createApiToken(config.jwtSecret, userAgent) };
+  // The servers' clock, so a device with a wrong clock still sends a current timestamp.
+  return { p: createApiToken(config.jwtSecret, userAgent, serverNow()) };
+}
+
+/** Browser-like source headers: Cloudflare blocks API requests without a deeni.tv referer. */
+function sourceHeaders(): Record<string, string> {
+  if (!config.apiReferer) return {};
+  const headers: Record<string, string> = { Referer: config.apiReferer };
+  const origin = /^https?:\/\/[^/]+/.exec(config.apiReferer)?.[0];
+  if (origin) headers.Origin = origin;
+  return headers;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -58,13 +68,19 @@ async function parseJson(res: Response): Promise<any> {
 
 /** GET with the `p` JWT. An unsigned request that gets a 403 is retried once (web client-fetch). */
 async function apiGet(url: string, timeoutMs: number): Promise<any> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...authHeaders() };
+  const headers: Record<string, string> = { Accept: 'application/json', ...sourceHeaders(), ...authHeaders() };
   let res = await fetchWithTimeout(url, { headers }, timeoutMs);
   if (res.status === 403 && !headers.p) {
-    res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, timeoutMs);
+    res = await fetchWithTimeout(url, { headers: { Accept: 'application/json', ...sourceHeaders() } }, timeoutMs);
   }
-  if (!res.ok) throw new Error(`API ${res.status} for ${url}`);
+  if (!res.ok) throw new Error(`API ${res.status} from ${refusedBy(res)} for ${url}`);
   return parseJson(res);
+}
+
+/** Who refused: Cloudflare's firewall page or the API itself (Express) — tells a blocked request from a bad token. */
+function refusedBy(res: Response): string {
+  if (res.headers.get('x-powered-by')) return 'api';
+  return /cloudflare/i.test(res.headers.get('server') ?? '') ? 'cloudflare' : 'server';
 }
 
 function channelQuery(channelId: string): { lid: string; isQuran: boolean } {

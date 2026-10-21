@@ -10,6 +10,13 @@ export const config = {
   /** JWT signing secret for the `p` header (web: NEXT_PUBLIC_NP_AS_L). Empty = no auth header. */
   jwtSecret: process.env.EXPO_PUBLIC_NP_AS_L || '',
   /**
+   * Sent as `Referer` (and its origin as `Origin`) with API requests, like a browser on
+   * the web app. Cloudflare in front of api.deeniinfotech.com blocks requests without a
+   * deeni.tv referer ("Sorry, you have been blocked", 2026-10-21) before they reach the
+   * API, so the app needs it until the API allows the app another way. Empty = not sent.
+   */
+  apiReferer: process.env.EXPO_PUBLIC_API_REFERER ?? 'https://www.deeni.tv/',
+  /**
    * Deployed web app: tier-2 schedule route (/api/current-video) and the
    * privacy policy page. Empty string disables tier 2.
    */

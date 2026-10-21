@@ -2,7 +2,7 @@
 // "What's on now" is computed from wall-clock time against a fixed epoch, so
 // every client independently lands on the same programme and offset.
 // `now` is a parameter (default: the server-corrected clock, lib/serverClock) so the maths can be unit-tested.
-import { serverNow } from '@/lib/serverClock';
+import { clockOffsetMs, serverNow } from '@/lib/serverClock';
 import { getPreviousVideos } from '@/lib/storage';
 import type { ScheduleItem, ScheduleResult, VideoProgram } from '@/types';
 
@@ -176,7 +176,10 @@ export function buildLocalCurrentVideoResponse(
       Math.min(upcomingPrograms.length, count),
     ),
     _source: 'local-schedule',
-    _fetchedAt: now,
+    // `now` is the servers' clock; _fetchedAt is the device's (callers add Date.now() −
+    // _fetchedAt). Storing `now` made a device whose clock is off start that far off: a TV
+    // box 23 s fast started 23 s ahead of the broadcast (2026-10-21).
+    _fetchedAt: now - clockOffsetMs(),
     channelUnavailable: current.channelUnavailable,
   };
 }

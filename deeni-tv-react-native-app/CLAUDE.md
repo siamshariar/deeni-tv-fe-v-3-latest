@@ -34,8 +34,8 @@ There is no lint script; run `npm run typecheck` and `npm test` before calling a
 
 There is no backend scheduler. "What's on now" is computed from the clock: `elapsed = now − MASTER_EPOCH_START`, `cycle = elapsed % channelDuration`, then walk the channel's programmes (`src/lib/schedule/schedule.ts`). Every client lands on the same programme and second.
 
-- `now` is the **server-corrected** clock (`src/lib/serverClock.ts`): every HTTP reply's `Date` header measures the device's offset. A TV box with a slow clock otherwise played 10–20 s behind the web.
-- Schedule sources, in order (`src/lib/api/client.ts`, `broadcastController.loadChannel`): external API `tv-schedules/live?lid=&iq=` (JWT in header `p`, secret `EXPO_PUBLIC_NP_AS_L`; unset = no auth and the API answers 403) → the deployed web app's `/api/current-video` → embedded `CHANNELS` (`src/lib/schedule/channelsData.ts`, a verbatim copy of the web data; only Bangla, English and Arabic have programmes, other channels fall back by language).
+- `now` is the **server-corrected** clock (`src/lib/serverClock.ts`): every HTTP reply's `Date` header measures the device's offset. A TV box with a slow clock otherwise played 10–20 s behind the web. Two clocks are in play: schedule times (`now`, `serverTime`, `startTime`) are server time, while `_fetchedAt` and every `Date.now()` difference in the controller are the device's clock. Mixing them shifts playback by the device's error (the built-in schedule stored `_fetchedAt: now`, and a box 23 s fast started 23 s ahead; fixed 2026-10-21, `liveSync.test.ts`). Offsets under 2 s count as noise, so a nearly right clock never shows such bugs: test with a device that is clearly off.
+- Schedule sources, in order (`src/lib/api/client.ts`, `broadcastController.loadChannel`): external API `tv-schedules/live?lid=&iq=` (JWT in header `p`, secret `EXPO_PUBLIC_NP_AS_L`, timestamp from `serverNow()`; unset = no auth and the API answers 403). Cloudflare in front of the API blocks any request without a deeni.tv `Referer` with its own HTML 403 ("Sorry, you have been blocked", found 2026-10-21; that is why browsers on the web get through and servers don't), so every API request also sends `Referer`/`Origin` from `EXPO_PUBLIC_API_REFERER` (tested in `apiClient.test.ts`). An Express "Forbidden" (`x-powered-by: Express`) means the request got past Cloudflare and the token was refused → the deployed web app's `/api/current-video` → embedded `CHANNELS` (`src/lib/schedule/channelsData.ts`, a verbatim copy of the web data; only Bangla, English and Arabic have programmes, other channels fall back by language).
 - Channel ids are the API's numeric ids (`"1"`…`"9"`); `resolveLocalChannelId()` maps them to local data by `localizationId` + Quran flag.
 
 ### Player
@@ -80,5 +80,5 @@ There is no backend scheduler. "What's on now" is computed from the clock: `elap
 ## Open decisions
 
 - App id is `com.deeni.tv`; the existing store app may be `com.deeniinfotech.deenitv` (to confirm before release; a store update needs the same id and signing key).
-- Release signing keystore (not in the repo).
+- Release signing keystore (not in the repo). Release steps (secret, Referer, version code, all CPU types, signing, permissions) are in the README's release checklist; `app.config.ts` blocks every permission but INTERNET and keeps the version code above the Capacitor app's 2.
 - YouTube / store policy review before release; YouTube-chrome workarounds are switchable in `youtubeFlags` (`src/lib/config.ts`).

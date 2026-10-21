@@ -60,11 +60,22 @@ Build-time variables (`.env.local`, git-ignored), defaults in `src/lib/config.ts
 | Variable | Purpose |
 |---|---|
 | `EXPO_PUBLIC_NP_AS_L` | JWT secret for the `p` header (web: `NEXT_PUBLIC_NP_AS_L`). Unset = no auth header |
+| `EXPO_PUBLIC_API_REFERER` | `Referer` (and `Origin`) sent with API requests, `https://www.deeni.tv/`. Cloudflare blocks API requests without it. Empty = not sent |
 | `EXPO_PUBLIC_API_BASE` | `https://api.deeniinfotech.com/api/tv-schedules` |
 | `EXPO_PUBLIC_TV_CHANNELS_API` | `https://api.deeniinfotech.com/api/tv-channels` |
 | `EXPO_PUBLIC_WEB_BASE_URL` | Deployed web app (tier-2 `/api/current-video`, privacy page). Empty disables tier 2 |
 | `EXPO_PUBLIC_PLAYER_ORIGIN` | Player page origin / YouTube `origin` (`https://www.deeni.tv`) |
 | `EXPO_PUBLIC_YOUTUBE_HOST` | `https://www.youtube.com` or `https://www.youtube-nocookie.com` |
+
+### Release checklist (Android)
+
+1. **API secret:** put `EXPO_PUBLIC_NP_AS_L=…` in `.env.local` before building (Metro inlines it into the bundle, as the web inlines `NEXT_PUBLIC_NP_AS_L`; anyone can extract it from the APK, the same exposure as the web's).
+2. **Cloudflare:** `api.deeniinfotech.com` blocks requests that don't carry a deeni.tv `Referer` ("Sorry, you have been blocked", HTML 403 from Cloudflare). The app sends `EXPO_PUBLIC_API_REFERER`. With it, a request reaches the API (`x-powered-by: Express`), which then checks the `p` token. Better for the long run: a Cloudflare rule that allows the app itself.
+3. **Version:** raise `BUILD_NUMBER` in `app.config.ts` for every upload. It must stay above the Capacitor app's versionCode 2 (same id `com.deeni.tv`); the TV build is `1000000 + BUILD_NUMBER`.
+4. **All CPU types:** build without `-PreactNativeArchitectures=…` (the test APKs carry one each); Google Play requires 64-bit code. Store uploads are AABs (`./gradlew bundleRelease`).
+5. **Signing:** release builds are debug-signed here. Updating an installed or published `com.deeni.tv` needs that app's signing key; Expo's prebuild regenerates `android/`, so add the signing config with a config plugin or EAS.
+6. **Permissions:** only `INTERNET` (the rest are blocked in `app.config.ts`); check with `aapt dump badging <apk>`.
+7. **Phone and TV builds:** two builds of one app id (`npm run prebuild` / `npm run prebuild:tv`); on Google Play the TV one goes on the Android TV track.
 
 YouTube-chrome behaviours are flags in `youtubeFlags` (`src/lib/config.ts`) so the
 outcome of the YouTube / store policy review is a setting change.

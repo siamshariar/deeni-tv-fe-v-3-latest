@@ -71,7 +71,7 @@ export function savePreviousVideos(channelId: string, videos: VideoProgram[]): v
 
 /** App-only (not on the web): the TV's learned load / seek times in seconds (broadcastController). */
 const PLAYER_LEADS_KEY = 'deeni-tv-player-leads';
-const LAUNCH_PROGRAMS_KEY = 'deeni-tv-launch-programs';
+const CHANNEL_PROGRAMS_KEY_PREFIX = 'deeni-tv-programs-';
 
 export function getPlayerLeads(): { load: number; seek: number; launch?: number } | null {
   const parsed = readJson<{ load?: unknown; seek?: unknown; launch?: unknown } | null>(PLAYER_LEADS_KEY, null);
@@ -79,13 +79,21 @@ export function getPlayerLeads(): { load: number; seek: number; launch?: number 
   return { load: parsed.load, seek: parsed.seek, ...(typeof parsed.launch === 'number' ? { launch: parsed.launch } : null) };
 }
 
-/** TV: the programmes saved for the next launch's first screen (launchSchedule.ts). */
-export function getLaunchPrograms(): { channelId: string; items: { id: string; title: string; start: number; end: number }[] } | null {
-  return readJson(LAUNCH_PROGRAMS_KEY, null);
+export interface SavedProgram {
+  id: string;
+  title: string;
+  /** When it runs in the broadcast (client clock, ms). */
+  start: number;
+  end: number;
 }
 
-export function saveLaunchPrograms(saved: { channelId: string; items: { id: string; title: string; start: number; end: number }[] }): void {
-  write(LAUNCH_PROGRAMS_KEY, JSON.stringify(saved));
+/** TV: a channel's programmes as last played, for its next start and the launch screen (launchSchedule.ts). */
+export function getChannelPrograms(channelId: string): SavedProgram[] | null {
+  return readJson(`${CHANNEL_PROGRAMS_KEY_PREFIX}${channelId}`, null);
+}
+
+export function saveChannelPrograms(channelId: string, programs: SavedProgram[]): void {
+  write(`${CHANNEL_PROGRAMS_KEY_PREFIX}${channelId}`, JSON.stringify(programs));
 }
 
 export function savePlayerLeads(leads: { load: number; seek: number; launch?: number }): void {

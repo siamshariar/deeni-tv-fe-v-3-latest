@@ -3,8 +3,9 @@
  * (components/synced-video-player.tsx at fixes_to_launch a080ec2) with the
  * same rules and timings, driving the live player page through EngineRef:
  *
- * - loadChannel: external API (wait 10 s, keep the request up to 120 s and
- *   switch if a late answer names a different video) → web route → embedded
+ * - loadChannel: external API (wait 10 s, TV 1.5 s; keep the request up to 120 s and
+ *   switch if a late answer names a different video) → web route → embedded.
+ *   TV: a saved schedule that reaches now starts the channel with no wait at all
  * - start at the live offset (seekTo + time since the schedule was fetched)
  * - muted start, unmute on the first frame; volume locked until then
  * - branded cover until real movement (0.5 s with cropChrome, else 3–5 s); stall cover after 1.2 s frozen
@@ -20,7 +21,7 @@ import { Platform } from 'react-native';
 import { fetchExternalSchedule, fetchWebRouteSchedule } from '@/lib/api/client';
 import { isUsableSchedule } from '@/lib/api/normalize';
 import { youtubeFlags } from '@/lib/config';
-import { saveLaunchSchedule, savedProgramOnNow } from '@/lib/launchSchedule';
+import { saveLaunchSchedule, savedProgramOnNow, savedScheduleOnNow } from '@/lib/launchSchedule';
 import { prefetchThumbnail } from '@/lib/youtube/thumbnail';
 import { alignQueue, embeddedQueueAfter, periodicQueue, upcomingFromSchedule } from '@/lib/schedule/queue';
 import { buildLocalCurrentVideoResponse, toVideoProgram } from '@/lib/schedule/schedule';
@@ -34,7 +35,9 @@ import type { ScheduleResult, VideoProgram } from '@/types';
 import { EngineRef } from './engine';
 
 // Web timings (Ref doc §5.6)
-const STARTUP_API_WAIT_MS = 10000;
+// TV: a slow API held the channel's load, and its sound and picture too (Safe Kids' load reaches
+// its page 0.2-0.4 s after OK, 2026-11-04).
+const STARTUP_API_WAIT_MS = Platform.isTV ? 1500 : 10000;
 // How long a channel start waits for the web schedule route before the built-in schedule.
 const WEB_ROUTE_START_WAIT_MS = 800;
 const LOAD_TIMEOUT_MS = 20000;
@@ -273,6 +276,7 @@ class BroadcastController {
   async loadChannel(channelId: string, options: LoadOptions = {}): Promise<void> {
     const attempt = ++this.attempt;
     const stale = () => attempt !== this.attempt;
+    const startedAt = Date.now();
 
     this.clearTimers();
     if (!options.isRecoveryRetry) this.recoveryAttempts = 0;
@@ -305,19 +309,19 @@ class BroadcastController {
     this.engine.run(playerCommand.mute(true));
 
     let result: ScheduleResult | null = options.prefetched ?? null;
+    // TV: a schedule already known starts the channel now, with the API still asked: the page's
+    // own start at launch goes on, and a channel change's load reaches the page at once.
+    if (!result && Platform.isTV) {
+      result = savedScheduleOnNow(channelId);
+      if (result) this.followLateApi(channelId, fetchExternalSchedule(channelId), stale);
+    }
     if (!result) {
       const apiPromise = fetchExternalSchedule(channelId);
       const raced = await Promise.race([apiPromise, delay(STARTUP_API_WAIT_MS)]);
       if (raced === PENDING) {
         // Don't hold the loading screen for a slow API; switch if it later
         // names a different programme (web: late API answer).
-        apiPromise
-          .then((late) => {
-            if (!late || stale()) return;
-            if (late.currentProgram.ytVideoId === this.expectedId) return;
-            void this.loadChannel(channelId, { prefetched: late });
-          })
-          .catch(() => {});
+        this.followLateApi(channelId, apiPromise, stale);
       } else {
         result = raced;
       }
@@ -328,7 +332,11 @@ class BroadcastController {
       // channel doesn't wait for it: it starts from the built-in schedule after a short grace,
       // and a later answer that comes from the API and names another programme switches to it.
       const routePromise = fetchWebRouteSchedule(channelId);
-      const raced = await Promise.race([routePromise, delay(WEB_ROUTE_START_WAIT_MS)]);
+      // TV: the API's wait counts: no more than STARTUP_API_WAIT_MS in all.
+      const routeWait = Platform.isTV
+        ? Math.min(WEB_ROUTE_START_WAIT_MS, Math.max(0, STARTUP_API_WAIT_MS - (Date.now() - startedAt)))
+        : WEB_ROUTE_START_WAIT_MS;
+      const raced = await Promise.race([routePromise, delay(routeWait)]);
       if (raced === PENDING) {
         routePromise
           .then((late) => {
@@ -345,6 +353,25 @@ class BroadcastController {
     if (!isUsableSchedule(result)) result = buildLocalCurrentVideoResponse(channelId, 15);
 
     this.applySchedule(channelId, result, attempt);
+  }
+
+  /** The API's answer after a channel has started: another programme switches to it, the same one takes its timing (TV). */
+  private followLateApi(channelId: string, api: Promise<ScheduleResult | null>, stale: () => boolean): void {
+    api
+      .then((late) => {
+        if (!late || stale()) return;
+        if (late.currentProgram.ytVideoId !== this.expectedId) {
+          void this.loadChannel(channelId, { prefetched: late });
+          return;
+        }
+        if (!Platform.isTV) return;
+        this.source = 'external-api';
+        this.adoptLiveTiming(late, true);
+        const upcoming = upcomingFromSchedule(late, channelId, this.expectedId);
+        if (upcoming.length > 0) useBroadcastStore.setState({ upcoming, nextProgram: upcoming[0] });
+        this.saveLaunch();
+      })
+      .catch(() => {});
   }
 
   private applySchedule(channelId: string, result: ScheduleResult, attempt: number): void {

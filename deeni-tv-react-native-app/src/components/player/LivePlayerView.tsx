@@ -4,7 +4,7 @@ import { broadcast } from '@/player/broadcastController';
 import { useBroadcastStore } from '@/store/useBroadcastStore';
 import { usePreviousPlayerStore } from '@/store/usePreviousPlayerStore';
 
-import { BrandedCover, RemainingTimePill, TuningOverlay, UpNextCard } from './Covers';
+import { BrandedCover, RemainingTimePill, UpNextCard } from './Covers';
 import { NativeLivePlayer, nativeLivePlayerAvailable } from './NativeLivePlayer';
 import { YouTubeWebView } from './YouTubeWebView';
 
@@ -45,13 +45,14 @@ export function LivePlayerView({
   const previousOpen = usePreviousPlayerStore((s) => s.isOpen);
 
   const vmin = Math.min(width, height);
-  // TV: the branded cover from the start (no tuning screen before it: a second heavy draw on the
-  // main thread YouTube's start shares), with the programme once it is known.
-  const tvTuning = Platform.isTV && phase === 'tuning';
+  // The branded cover from the start, with the programme once it is known: no separate tuning
+  // screen (TV: a second heavy draw on the main thread YouTube's start shares). Phone: logo only
+  // until then (user request 2026-11-08); the same element stays, so its ring keeps turning.
+  const tuning = phase === 'tuning';
   // TV, a stall while playing (no picture to show): nothing of ours over the video. YouTube's own
   // spinner shows, as on YouTube, and the controller still catches up behind the scenes.
   const tvStall = Platform.isTV && phase === 'playing' && coverVisible && !coverVideoId;
-  const showBranded = tvTuning || phase === 'branded' || phase === 'unavailable' || (phase === 'playing' && coverVisible && !tvStall);
+  const showBranded = tuning || phase === 'branded' || phase === 'unavailable' || (phase === 'playing' && coverVisible && !tvStall);
   const note =
     phase === 'unavailable' && unavailableUntil
       ? "This programme isn't available here. The next one starts soon."
@@ -70,8 +71,19 @@ export function LivePlayerView({
       <Pressable style={StyleSheet.absoluteFill} onPress={onActivity} focusable={false} accessible={false} />
       {phase === 'playing' && !showBranded ? <LiveRemainingPill unit={unit} compact={compact} /> : null}
       {upNextCard && phase === 'playing' && !showBranded ? <UpNextCard unit={unit} program={upNextCard} /> : null}
-      {phase === 'tuning' && !tvTuning ? <TuningOverlay unit={unit} compact={compact} vmin={vmin} /> : null}
-      {showBranded ? <BrandedCover unit={unit} compact={compact} vmin={vmin} title={coverTitle} titleOnTv note={note} upNext={endCover && phase === 'playing'} videoId={coverVideoId ?? undefined} /> : null}
+      {showBranded ? (
+        <BrandedCover
+          unit={unit}
+          compact={compact}
+          vmin={vmin}
+          title={coverTitle}
+          titleOnTv
+          logoOnly={tuning}
+          note={note}
+          upNext={endCover && phase === 'playing'}
+          videoId={coverVideoId ?? undefined}
+        />
+      ) : null}
     </View>
   );
 }

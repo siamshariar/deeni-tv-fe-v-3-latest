@@ -5,7 +5,7 @@ import { Capacitor } from '@capacitor/core'
 import { motion, AnimatePresence } from 'framer-motion'
 import { 
   Volume2, VolumeX, Maximize, MoreHorizontal, Minimize, 
-  Tv, Clock, ArrowRight, Eye, EyeOff, Repeat, Volume1, 
+  Clock, ArrowRight, Eye, EyeOff, Repeat, Volume1, 
   Volume, AlertCircle, RefreshCw, Play, Loader2, Radio,
   WifiOff, Globe, X, Smartphone, Tablet, Laptop,
   Sparkles, Zap, Shield, Star, Heart, ChevronRight,
@@ -444,14 +444,40 @@ const LiveBadge = ({ variant = 'default', isMobile = false }: { variant?: 'defau
   return null
 }
 
-// Branded Loading Overlay - Shows during YouTube iframe loading (event-based, not timer-based)
-const BrandedLoadingOverlay = ({ 
-  isVisible, 
-  programName 
-}: { 
+// Branded Loading Overlay - Shows during YouTube iframe loading (event-based, not timer-based).
+// `logoOnly`: the first loading screen, while the schedule is fetched (in place of "Tuning into
+// your broadcast..."): the same screen with no text. The program banner slots in once the
+// program is known; its place is kept, invisible, under the bar, so the ring stays where it is
+// (a two-line title moves it up half a line).
+const BrandedLoadingOverlay = ({
+  isVisible,
+  programName,
+  logoOnly = false,
+}: {
   isVisible: boolean
   programName: string
+  logoOnly?: boolean
 }) => {
+  const programBanner = (hidden: boolean) => (
+    <div
+      aria-hidden={hidden || undefined}
+      className={`max-w-[85%] sm:max-w-md md:max-w-lg text-center px-3 sm:px-5 md:px-6 ${hidden ? 'invisible' : ''}`}
+    >
+      <motion.div
+        initial={hidden ? false : { y: 10, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ delay: 0.2 }}
+        className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl px-3 py-2 sm:px-4 sm:py-2.5 md:px-5 md:py-3"
+      >
+        <p className="text-white/50 uppercase tracking-wider font-medium text-[7px] sm:text-[9px] md:text-[10px] mb-0.5 sm:mb-1">
+          Watching
+        </p>
+        <h3 className="text-white font-bold leading-tight line-clamp-2 text-sm sm:text-base md:text-lg lg:text-xl">
+          {hidden ? ' ' : programName || 'Loading program...'}
+        </h3>
+      </motion.div>
+    </div>
+  )
   return (
     <AnimatePresence>
       {isVisible && (
@@ -493,24 +519,11 @@ const BrandedLoadingOverlay = ({
                 className="h-[40%] w-auto object-contain"
               />
             </div>
-            
-            {/* Program name banner */}
-            <div className="max-w-[85%] sm:max-w-md md:max-w-lg text-center px-3 sm:px-5 md:px-6">
-              <motion.div
-                initial={{ y: 10, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl px-3 py-2 sm:px-4 sm:py-2.5 md:px-5 md:py-3"
-              >
-                <p className="text-white/50 uppercase tracking-wider font-medium text-[7px] sm:text-[9px] md:text-[10px] mb-0.5 sm:mb-1">
-                  Watching
-                </p>
-                <h3 className="text-white font-bold leading-tight line-clamp-2 text-sm sm:text-base md:text-lg lg:text-xl">
-                  {programName || 'Loading program...'}
-                </h3>
-              </motion.div>
-            </div>
-            
+
+            {/* Program name banner. Same order of children with and without
+                `logoOnly`, so the ring and the bar keep running. */}
+            {logoOnly ? null : programBanner(false)}
+
             {/* Loading bar animation */}
             <motion.div 
               className="w-[25vmin] min-w-[6rem] max-w-[12rem] h-1 bg-white/10 rounded-full overflow-hidden"
@@ -521,6 +534,7 @@ const BrandedLoadingOverlay = ({
                 className="h-full w-full bg-gradient-to-r from-transparent via-primary to-transparent"
               />
             </motion.div>
+            {logoOnly ? programBanner(true) : null}
           </motion.div>
         </motion.div>
       )}
@@ -3015,9 +3029,12 @@ export function SyncedVideoPlayer({
           />
           <div className="absolute inset-0 w-full h-full pointer-events-auto" />
           
-          {/* Branded Loading Overlay - Shows during YouTube loading, hides on PLAYING event */}
+          {/* Branded Loading Overlay - Shows during YouTube loading, hides on PLAYING event.
+              While the schedule is fetched (isLoading) it is the first loading screen, with
+              the logo only; one element for both, so it doesn't flash between them. */}
           <BrandedLoadingOverlay
-            isVisible={showBrandedOverlay && !showStartScreen && !isLoading}
+            isVisible={isLoading ? !apiError : showBrandedOverlay && !showStartScreen}
+            logoOnly={isLoading}
             programName={brandedOverlayProgramRef.current || currentProgram?.title || ''}
           />
           
@@ -3043,74 +3060,6 @@ export function SyncedVideoPlayer({
             isVisible={soundPromptVisible}
             onUnmute={answerSoundPrompt}
           />
-          
-          {/* Loading overlay */}
-          {isLoading && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 flex items-center justify-center bg-black/90 backdrop-blur-xl z-40 p-4"
-            >
-              <div className="text-center w-full max-w-xs mx-auto px-4 sm:px-6">
-                <div className={`relative flex items-center justify-center mb-6 ${
-                  isMobile ? 'w-20 h-20' : 'w-24 h-24'
-                } mx-auto`}>
-                  <motion.div
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-                    className="relative flex items-center justify-center w-full h-full"
-                  >
-                    <div className="absolute inset-0 rounded-full border-4 border-primary/30" />
-                    <div className="absolute inset-0 rounded-full border-t-4 border-primary animate-spin" />
-                    <motion.div
-                      animate={{ scale: [1, 1.1, 1] }}
-                      transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
-                      className="relative flex items-center justify-center"
-                    >
-                      <Tv className={`${isMobile ? 'h-10 w-10' : 'h-12 w-12'} text-primary relative z-10`} />
-                    </motion.div>
-                    <motion.div
-                      animate={{ y: ['-100%', '200%'] }}
-                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                      className="absolute inset-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/30 to-transparent blur-sm pointer-events-none"
-                    />
-                  </motion.div>
-                </div>
-                
-                <motion.p 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.2 }}
-                  className={`text-white ${isMobile ? 'text-base' : 'text-lg'} mb-2 font-medium`}
-                >
-                  Tuning into your broadcast...
-                </motion.p>
-                
-                <motion.p 
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.3 }}
-                  className={`text-white/60 ${isMobile ? 'text-xs' : 'text-sm'}`}
-                >
-                  Please wait while we connect
-                </motion.p>
-
-                <motion.div 
-                  initial={{ scaleX: 0 }}
-                  animate={{ scaleX: 1 }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                  className="mt-6 h-1 w-48 bg-primary/20 rounded-full overflow-hidden mx-auto"
-                >
-                  <motion.div
-                    animate={{ x: ['-100%', '100%'] }}
-                    transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                    className="h-full w-full bg-gradient-to-r from-transparent via-primary to-transparent"
-                  />
-                </motion.div>
-              </div>
-            </motion.div>
-          )}
           
           {/* Error overlay */}
           {apiError && (

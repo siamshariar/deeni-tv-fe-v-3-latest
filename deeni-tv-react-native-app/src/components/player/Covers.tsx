@@ -2,7 +2,6 @@ import AlertCircle from 'lucide-react-native/icons/circle-alert';
 import Clock from 'lucide-react-native/icons/clock';
 import Play from 'lucide-react-native/icons/play';
 import RefreshCw from 'lucide-react-native/icons/refresh-cw';
-import Tv from 'lucide-react-native/icons/tv';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Image, Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
@@ -29,41 +28,31 @@ interface Sizing {
   vmin: number;
 }
 
-/** "Tuning into your broadcast..." (web W-02) while the schedule is fetched. */
-export function TuningOverlay({ unit, compact }: Sizing) {
-  const ring = (compact ? 80 : 96) * unit;
-  const icon = (compact ? 40 : 48) * unit;
-  return (
-    <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: colors.black90, padding: 16 * unit }]}>
-      <View style={[styles.center, { width: ring, height: ring, marginBottom: 24 * unit }]}>
-        <LoaderRing size={ring} stroke={4 * unit} trackOpacity={0.3} durationMs={2000} />
-        <Pulse>
-          <Tv size={icon} color={colors.gold} />
-        </Pulse>
-      </View>
-      <Text style={[styles.text, { fontFamily: fonts.medium, fontSize: (compact ? 16 : 18) * unit, marginBottom: 8 * unit }]}>
-        Tuning into your broadcast...
-      </Text>
-      <Text style={[styles.text, { color: colors.text60, fontFamily: fonts.regular, fontSize: (compact ? 12 : 14) * unit }]}>
-        Please wait while we connect
-      </Text>
-      <View style={{ marginTop: 24 * unit }}>
-        <SweepBar width={192 * unit} height={4 * unit} durationMs={1500} color={colors.gold} trackColor="rgba(217,165,20,0.2)" />
-      </View>
-    </View>
-  );
-}
-
 /**
  * The branded "WATCHING ‹title›" screen (web W-03). Fully opaque: it hides
  * the YouTube iframe (its spinner, title bar, end screen) until the video
  * has really moved. `note` adds a line under the title (unavailable programme).
  *
+ * `logoOnly`: the phone's first loading screen, while the schedule is fetched (user request
+ * 2026-11-08, in place of the web's "Tuning into your broadcast..."): the same screen with no
+ * text. The title box slots in once the programme is known; its place is kept, invisible, under
+ * the sweep bar, so the ring stays where it is (a two-line title moves it up half a line).
+ *
  * TV: TvCover. The WebView's browser side runs on the app's main thread, and on the TV box the SVG
  * gradient (drawn in software) and the Reanimated loops kept that thread busy while YouTube
  * started: decoder to first picture took 6.6 s instead of 3.6 s (profile, 2026-11-04).
  */
-export function BrandedCover({ unit, compact, vmin, title, note, upNext, videoId, titleOnTv }: Sizing & { title: string; note?: string; upNext?: boolean; videoId?: string; titleOnTv?: boolean }) {
+export function BrandedCover({
+  unit,
+  compact,
+  vmin,
+  title,
+  note,
+  upNext,
+  videoId,
+  titleOnTv,
+  logoOnly,
+}: Sizing & { title: string; note?: string; upNext?: boolean; videoId?: string; titleOnTv?: boolean; logoOnly?: boolean }) {
   if (Platform.isTV) return <TvCover unit={unit} title={titleOnTv ? title : ''} note={note} videoId={videoId} />;
   // Ring and sweep bar are sized from the screen like the web's 14vmin / 25vmin
   // (CSS vmin is the viewport, not the video box: the box-based size was ~30 %
@@ -73,6 +62,35 @@ export function BrandedCover({ unit, compact, vmin, title, note, upNext, videoId
   const ring = Math.round(Math.max((compact ? 56 : 72) * unit, Math.min(screenVmin * 0.14, (compact ? 112 : 144) * unit)));
   const smallText = (compact ? 7 : 10) * unit;
   const titleSize = (compact ? 14 : 18) * unit;
+  // `hidden`: only holds the box's place (one line of title), for `logoOnly`.
+  const titleBox = (hidden: boolean) => (
+    <View
+      accessibilityElementsHidden={hidden}
+      importantForAccessibility={hidden ? 'no-hide-descendants' : 'auto'}
+      style={{
+        maxWidth: Math.min(vmin * 1.6, 512 * unit),
+        backgroundColor: colors.fill5,
+        borderColor: colors.border10,
+        borderWidth: 1,
+        borderRadius: 12 * unit,
+        paddingHorizontal: (compact ? 12 : 20) * unit,
+        paddingVertical: (compact ? 8 : 12) * unit,
+        opacity: hidden ? 0 : 1,
+      }}
+    >
+      <Text style={[styles.text, { color: colors.text50, fontFamily: fonts.medium, fontSize: smallText, letterSpacing: 1, marginBottom: 2 * unit }]}>
+        {upNext ? 'UP NEXT' : 'WATCHING'}
+      </Text>
+      <Text numberOfLines={2} style={[styles.text, { fontFamily: fonts.bold, fontSize: titleSize, lineHeight: titleSize * 1.25 }]}>
+        {hidden ? ' ' : title || 'Loading program...'}
+      </Text>
+      {note && !hidden ? (
+        <Text style={[styles.text, { color: colors.text60, fontFamily: fonts.regular, fontSize: (compact ? 11 : 13) * unit, marginTop: 6 * unit }]}>
+          {note}
+        </Text>
+      ) : null}
+    </View>
+  );
   return (
     <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: '#000' }]}>
       <Gradient
@@ -95,29 +113,8 @@ export function BrandedCover({ unit, compact, vmin, title, note, upNext, videoId
           {/* Web: the wordmark at 40 % of the ring's height, capped by the ring's width. */}
           <Logo height={Math.min(ring * 0.4, (ring * 0.86) / (3033 / 595))} />
         </View>
-        <View
-          style={{
-            maxWidth: Math.min(vmin * 1.6, 512 * unit),
-            backgroundColor: colors.fill5,
-            borderColor: colors.border10,
-            borderWidth: 1,
-            borderRadius: 12 * unit,
-            paddingHorizontal: (compact ? 12 : 20) * unit,
-            paddingVertical: (compact ? 8 : 12) * unit,
-          }}
-        >
-          <Text style={[styles.text, { color: colors.text50, fontFamily: fonts.medium, fontSize: smallText, letterSpacing: 1, marginBottom: 2 * unit }]}>
-            {upNext ? 'UP NEXT' : 'WATCHING'}
-          </Text>
-          <Text numberOfLines={2} style={[styles.text, { fontFamily: fonts.bold, fontSize: titleSize, lineHeight: titleSize * 1.25 }]}>
-            {title || 'Loading program...'}
-          </Text>
-          {note ? (
-            <Text style={[styles.text, { color: colors.text60, fontFamily: fonts.regular, fontSize: (compact ? 11 : 13) * unit, marginTop: 6 * unit }]}>
-              {note}
-            </Text>
-          ) : null}
-        </View>
+        {/* Same order of children with and without `logoOnly`: the ring and sweep bar keep running. */}
+        {logoOnly ? null : titleBox(false)}
         {upNext ? null : (
           <SweepBar
             width={Math.max(96 * unit, Math.min(screenVmin * 0.25, 192 * unit))}
@@ -127,6 +124,7 @@ export function BrandedCover({ unit, compact, vmin, title, note, upNext, videoId
             trackColor={colors.fill10}
           />
         )}
+        {logoOnly ? titleBox(true) : null}
       </View>
     </View>
   );

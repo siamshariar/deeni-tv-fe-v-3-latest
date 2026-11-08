@@ -8,7 +8,7 @@ import type { VideoProgram } from '@/types';
  *
  * phase:
  * - idle        nothing chosen yet
- * - tuning      the schedule is being fetched ("Tuning into your broadcast...")
+ * - tuning      the schedule is being fetched (the branded cover; phone: logo only, no text)
  * - branded     programme known, video starting (branded WATCHING cover)
  * - playing     the real video is moving
  * - unavailable this programme can't be embedded; waits for the next one

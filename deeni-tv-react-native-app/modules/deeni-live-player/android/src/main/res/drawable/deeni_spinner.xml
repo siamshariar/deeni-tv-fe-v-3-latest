@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The TV's loading ring: a faint full circle and a thin gold arc turning. An animated vector runs on the render thread, so it costs the main thread nothing (Chromium's browser side shares that thread with YouTube's start) and keeps turning when the main thread is busy. -->
+<animated-vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt">
+  <aapt:attr name="android:drawable">
+    <vector
+        android:width="48dp"
+        android:height="48dp"
+        android:viewportWidth="48"
+        android:viewportHeight="48">
+      <path
+          android:pathData="M24,2 a22,22 0 1,1 0,44 a22,22 0 1,1 0,-44"
+          android:strokeColor="#33FFFFFF"
+          android:strokeWidth="1.5" />
+      <group
+          android:name="rotor"
+          android:pivotX="24"
+          android:pivotY="24">
+        <path
+            android:pathData="M24,2 a22,22 0 0,1 22,22"
+            android:strokeColor="#D9A514"
+            android:strokeLineCap="round"
+            android:strokeWidth="1.5" />
+      </group>
+    </vector>
+  </aapt:attr>
+  <target android:name="rotor">
+    <aapt:attr name="android:animation">
+      <objectAnimator
+          android:duration="1000"
+          android:interpolator="@android:interpolator/linear"
+          android:propertyName="rotation"
+          android:repeatCount="infinite"
+          android:valueFrom="0"
+          android:valueTo="360" />
+    </aapt:attr>
+  </target>
+</animated-vector>

@@ -1,0 +1,11 @@
+{
+  "platforms": [
+    "android"
+  ],
+  "android": {
+    "modules": [
+      "expo.modules.deenilive.DeeniLivePlayerModule",
+      "expo.modules.deenilive.DeeniSpinnerModule"
+    ]
+  }
+}

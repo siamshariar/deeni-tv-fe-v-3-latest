@@ -1,7 +1,15 @@
-import { History, Maximize, Minimize, Pause, Play, RotateCcw, RotateCw, Volume2, VolumeX, X } from 'lucide-react-native';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import Maximize from 'lucide-react-native/icons/maximize';
+import Minimize from 'lucide-react-native/icons/minimize';
+import Pause from 'lucide-react-native/icons/pause';
+import Play from 'lucide-react-native/icons/play';
+import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
+import RotateCw from 'lucide-react-native/icons/rotate-cw';
+import Volume2 from 'lucide-react-native/icons/volume-2';
+import VolumeX from 'lucide-react-native/icons/volume-x';
+import X from 'lucide-react-native/icons/x';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Image,
   PanResponder,
   Platform,
   Pressable,
@@ -22,6 +30,7 @@ import { RoundButton } from '@/components/shell/RoundButton';
 import { useFrameLayout } from '@/hooks/useFrameLayout';
 import { fitBarMetrics } from '@/lib/playerLayout';
 import { youtubeFlags } from '@/lib/config';
+import { prefetchThumbnail } from '@/lib/youtube/thumbnail';
 import { colors, fonts } from '@/lib/theme';
 import { formatTime } from '@/lib/time';
 import { focusWithRetry, requestTVFocus } from '@/lib/tvFocus';
@@ -29,7 +38,7 @@ import { setPreviousFullscreen } from '@/player/fullscreen';
 import { SKIP_SECONDS, previousPlayer } from '@/player/previousController';
 import { usePreviousPlayerStore } from '@/store/usePreviousPlayerStore';
 
-import { BrandedCover } from './Covers';
+import { BrandedCover, PausedIndicator, PlaybackIndicator, ThumbnailCover } from './Covers';
 import { YouTubeWebView } from './YouTubeWebView';
 
 const CONTROLS_HIDE_MS = 3500;
@@ -53,6 +62,10 @@ export function PreviousPlayerLayer() {
     usePreviousPlayerStore.setState({ controlsVisible: true });
     setActivity((n) => n + 1);
   }, []);
+  const onVideoTap = useCallback(() => {
+    if (!Platform.isTV && !usePreviousPlayerStore.getState().isLoading) previousPlayer.togglePlay();
+    bump();
+  }, [bump]);
 
   // Title / progress / pill (and the bar in fullscreen) hide after 3.5 s while playing.
   // TV (always fullscreen): after the programme has started they stay 5 s the first time.
@@ -71,6 +84,11 @@ export function PreviousPlayerLayer() {
     }, delay);
     return () => clearTimeout(t);
   }, [s.isOpen, s.isPlaying, s.isEnded, s.isLoading, s.controlsVisible, activity]);
+
+  const videoId = s.video?.videoId;
+  useEffect(() => {
+    if (videoId && youtubeFlags.thumbnailCoverOnPauseAndEnd) prefetchThumbnail(videoId);
+  }, [videoId]);
 
   // TV remote: any key shows the controls; media keys drive the transport.
   // react-native-tvos sends Android TV keys to JS on key-up only (key-down
@@ -97,13 +115,16 @@ export function PreviousPlayerLayer() {
   // While the remote scrubs, the video keeps playing; a busy box can delay its progress
   // reports, so the stall cover is not shown then (it would cover the moving bar).
   const scrubbing = s.scrubTime !== null;
-  const showBranded = !!s.video && (s.isLoading || (s.isStalled && !s.isEnded && !scrubbing));
+  // TV: a cover only for a video starting. Over a stall, a resume or a seek YouTube's own spinner
+  // shows on the picture, as on YouTube (user request 2026-11-04).
+  const showStalled = !Platform.isTV && s.isStalled;
+  const showBranded = !!s.video && (s.isLoading || (showStalled && !s.isEnded && !scrubbing));
   // TV fullscreen with the controls hidden: the first key only shows them (see the
   // live screen); the hidden buttons and seek bar can't take focus meanwhile.
   const tvHidden = Platform.isTV && s.isOpen && fs && !showChrome;
   // Web: the iframe is hidden whenever a cover is up (loading, stall, pause /
   // end thumbnail), so YouTube's own spinner, title bar and "More videos" never show.
-  const videoShown = s.isOpen && !s.isLoading && (!s.isStalled || scrubbing) && (s.isPlaying || !youtubeFlags.thumbnailCoverOnPauseAndEnd);
+  const videoShown = s.isOpen && !s.isLoading && (!showStalled || scrubbing) && (s.isPlaying || !youtubeFlags.thumbnailCoverOnPauseAndEnd);
 
   // Title / progress / pill. Always mounted while open, under the branded
   // cover like the web (z-30 under z-45; above it in fullscreen): unmounting
@@ -191,13 +212,22 @@ export function PreviousPlayerLayer() {
           onMessage={(msg) => previousPlayer.onPlayerMessage(msg)}
           style={[StyleSheet.absoluteFill, { opacity: videoShown ? 1 : 0 }]}
         />
-        {/* A tap only shows the controls; it never pauses (mobile web, M-06). */}
-        <Pressable style={StyleSheet.absoluteFill} onPress={bump} focusable={false} accessible={false} />
+        {/* Phone: a tap plays / pauses and shows the controls (user request 2026-11-03; the web
+            only shows them, M-06). TV has no touch: the remote's play button does it. */}
+        <Pressable style={StyleSheet.absoluteFill} onPress={onVideoTap} focusable={false} accessible={false} />
 
         {showThumb ? <ThumbnailCover videoId={s.video!.videoId} /> : null}
+        <PlaybackIndicator trigger={s.resumeFlash} covered={!videoShown || showThumb || showBranded} />
+        {s.isOpen && !s.isPlaying && !s.isEnded && !s.isLoading ? <PausedIndicator /> : null}
         {fs ? null : strip}
         {showBranded ? (
-          <BrandedCover unit={unit} compact={compact} vmin={Math.min(box.width, box.height)} title={s.video!.title} />
+          <BrandedCover
+            unit={unit}
+            compact={compact}
+            vmin={Math.min(box.width, box.height)}
+            title={s.video!.title}
+            videoId={s.isLoading ? s.video!.videoId : undefined}
+          />
         ) : null}
         {fs && s.isOpen ? (
           // Web fullscreen: one edge-to-edge gradient (black 95 % → 70 % → clear) behind
@@ -240,22 +270,6 @@ export function PreviousPlayerLayer() {
           onActivity={bump}
         />
       ) : null}
-    </View>
-  );
-}
-
-function ThumbnailCover({ videoId }: { videoId: string }) {
-  const [quality, setQuality] = useState<'maxresdefault' | 'hqdefault'>('maxresdefault');
-  useEffect(() => setQuality('maxresdefault'), [videoId]);
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      <Image
-        source={{ uri: `https://img.youtube.com/vi/${videoId}/${quality}.jpg` }}
-        onError={() => setQuality('hqdefault')}
-        style={StyleSheet.absoluteFill}
-        resizeMode="cover"
-      />
-      <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.55)' }]} />
     </View>
   );
 }

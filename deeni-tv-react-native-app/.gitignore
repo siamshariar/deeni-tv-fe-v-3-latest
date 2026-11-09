@@ -39,6 +39,8 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+modules/*/android/build/
+modules/*/android/.cxx/
 
 # local Gradle cache (GRADLE_USER_HOME for builds on this machine)
 .gradle-home/

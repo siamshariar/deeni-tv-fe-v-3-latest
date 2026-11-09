@@ -18,6 +18,7 @@ export class EngineRef {
 
   attach(host: EngineHost): void {
     this.host = host;
+    if (this.pageLoaded) this.flush();
   }
 
   detach(host: EngineHost): void {
@@ -27,9 +28,14 @@ export class EngineRef {
     }
   }
 
-  /** The WebView finished loading the page document: flush queued commands. */
+  /** The page's script runs (its `boot` message, or the WebView's load end): flush queued commands. */
   onPageLoaded(): void {
     this.pageLoaded = true;
+    this.flush();
+  }
+
+  private flush(): void {
+    if (!this.host) return;
     const pending = this.queue;
     this.queue = [];
     pending.forEach((js) => this.host?.run(js));

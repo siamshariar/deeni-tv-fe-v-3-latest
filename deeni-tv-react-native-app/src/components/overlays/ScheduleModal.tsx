@@ -1,4 +1,4 @@
-import { Calendar } from 'lucide-react-native';
+import Calendar from 'lucide-react-native/icons/calendar';
 import { useMemo } from 'react';
 import { FlatList, Platform, Text, View } from 'react-native';
 
@@ -43,6 +43,8 @@ export function ScheduleModal() {
           <FlatList
             data={schedule}
             keyExtractor={(p, i) => `${p.id}-${i}`}
+            // TV: only the rows on screen are built when it opens.
+            initialNumToRender={Platform.isTV ? 5 : undefined}
             style={{ flexGrow: 0, flexShrink: 1 }}
             contentContainerStyle={{ padding: 16 * unit, gap: 8 * unit }}
             renderItem={({ item, index }) => {

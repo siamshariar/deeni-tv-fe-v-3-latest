@@ -1,4 +1,4 @@
-import { Heart } from 'lucide-react-native';
+import Heart from 'lucide-react-native/icons/heart';
 import { useState } from 'react';
 import { Platform, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';

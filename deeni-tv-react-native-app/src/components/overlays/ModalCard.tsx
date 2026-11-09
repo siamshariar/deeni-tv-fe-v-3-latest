@@ -1,4 +1,4 @@
-import { X } from 'lucide-react-native';
+import X from 'lucide-react-native/icons/x';
 import { useEffect, type ReactNode } from 'react';
 import { Platform, Pressable, StyleSheet, Text, TVFocusGuideView, View, useWindowDimensions } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -32,9 +32,11 @@ export function ModalCard({
 }) {
   const layout = useFrameLayout();
   const { height } = useWindowDimensions();
-  const progress = useSharedValue(0);
+  // TV: open at once, no fade or scale (it took up to 1.4 s on the test box; user request
+  // 2026-11-03). Phones keep the web's 200 ms opening.
+  const progress = useSharedValue(Platform.isTV ? 1 : 0);
   useEffect(() => {
-    progress.value = withTiming(1, { duration: 200 });
+    if (!Platform.isTV) progress.value = withTiming(1, { duration: 200 });
   }, [progress]);
   const cardStyle = useAnimatedStyle(() => ({
     opacity: progress.value,
@@ -43,14 +45,14 @@ export function ModalCard({
   const backdropStyle = useAnimatedStyle(() => ({ opacity: progress.value }));
   const width = wide ? Math.min(672 * layout.unit, layout.windowWidth - 32 * layout.unit) : layout.modalWidth;
 
-  const card = (
-    <Animated.View
-      style={[
-        styles.card,
-        { width, maxHeight: height * maxHeightRatio, borderRadius: 16 * layout.unit },
-        cardStyle,
-      ]}
-    >
+  const cardBox = [styles.card, { width, maxHeight: height * maxHeightRatio, borderRadius: 16 * layout.unit }];
+  const card = Platform.isTV ? (
+    <View style={cardBox}>
+      <SurfaceGradient />
+      {children}
+    </View>
+  ) : (
+    <Animated.View style={[cardBox, cardStyle]}>
       <SurfaceGradient />
       {children}
     </Animated.View>
@@ -58,7 +60,7 @@ export function ModalCard({
 
   return (
     <View style={[StyleSheet.absoluteFill, styles.center]}>
-      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(0,0,0,${backdropOpacity})` }, backdropStyle]}>
+      <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: `rgba(0,0,0,${backdropOpacity})` }, Platform.isTV ? null : backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onBackdropPress} focusable={false} accessible={false} />
       </Animated.View>
       {Platform.isTV ? (

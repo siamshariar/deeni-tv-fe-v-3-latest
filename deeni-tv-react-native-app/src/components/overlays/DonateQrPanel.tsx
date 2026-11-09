@@ -1,4 +1,4 @@
-import { Heart } from 'lucide-react-native';
+import Heart from 'lucide-react-native/icons/heart';
 import { Text, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 

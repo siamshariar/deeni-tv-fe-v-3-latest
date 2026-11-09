@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Platform, StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 
 export interface GradientStop {
@@ -23,7 +23,29 @@ interface Props {
  * it made before a rotation (phone fullscreen → portrait) and only covered the
  * old landscape height.
  */
-export function Gradient({ stops, direction = 'br', style }: Props) {
+export function Gradient(props: Props) {
+  return Platform.isTV ? <NativeGradient {...props} /> : <SvgGradient {...props} />;
+}
+
+const CSS_DIRECTION = { br: 'to bottom right', b: 'to bottom', r: 'to right' } as const;
+
+function stopColor({ color, opacity }: GradientStop): string {
+  if (opacity === undefined) return color;
+  const hex = color.length === 4 ? color.replace(/[0-9a-f]/gi, '$&$&') : color;
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16},${(n >> 8) & 255},${n & 255},${opacity})`;
+}
+
+/**
+ * TV: drawn by the view itself. react-native-svg draws in software on the main thread, and a
+ * popup's card and header gradients were the biggest cost of opening it on the TV box (2026-11-04).
+ */
+function NativeGradient({ stops, direction = 'br', style }: Props) {
+  const css = `linear-gradient(${CSS_DIRECTION[direction]}, ${stops.map((s) => `${stopColor(s)} ${s.offset * 100}%`).join(', ')})`;
+  return <View style={[StyleSheet.absoluteFill, { experimental_backgroundImage: css }, style]} pointerEvents="none" />;
+}
+
+function SvgGradient({ stops, direction = 'br', style }: Props) {
   const id = `g${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const [x2, y2] = direction === 'br' ? ['1', '1'] : direction === 'b' ? ['0', '1'] : ['1', '0'];

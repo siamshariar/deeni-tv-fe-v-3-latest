@@ -1,5 +1,12 @@
-import { Calendar, Globe, Heart, History, Info, RefreshCw, X, type LucideIcon } from 'lucide-react-native';
-// Hidden for now (Privacy Policy item below): import { Shield } from 'lucide-react-native';
+import Calendar from 'lucide-react-native/icons/calendar';
+import Globe from 'lucide-react-native/icons/globe';
+import Heart from 'lucide-react-native/icons/heart';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import Info from 'lucide-react-native/icons/info';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import X from 'lucide-react-native/icons/x';
+import type { LucideIcon } from 'lucide-react-native';
+// Hidden for now (Privacy Policy item below): import Shield from 'lucide-react-native/icons/shield';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TVFocusGuideView, View } from 'react-native';
 import Animated, { Easing, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -47,10 +54,10 @@ const BOTTOM: Item[] = [
   // ...(Platform.isTV ? [] : [{ label: 'Privacy Policy', icon: Shield, run: openPrivacyPolicy, immediate: true }]),
 ];
 
-// TV boxes draw a frame every ~50 ms while video plays: a slightly longer slide
-// keeps enough frames for it to read as a slide.
-const OPEN_MS = Platform.isTV ? 420 : 320;
-const CLOSE_MS = Platform.isTV ? 260 : 220;
+// TV: no slide, it opens at once like the other popups (user request 2026-11-04; the slide took
+// 420 ms and ~1.9 s with the frames it dropped on the TV box).
+const OPEN_MS = Platform.isTV ? 0 : 320;
+const CLOSE_MS = Platform.isTV ? 0 : 220;
 
 /**
  * The 3-dot menu (web W-11): slides in from the right, 88 % wide, max 384,

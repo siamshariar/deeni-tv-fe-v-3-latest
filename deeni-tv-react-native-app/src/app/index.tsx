@@ -1,6 +1,6 @@
 import { StatusBar } from 'expo-status-bar';
 import { useKeepAwake } from 'expo-keep-awake';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, StyleSheet, View, useTVEventHandler } from 'react-native';
 
 import { CornerMasks } from '@/components/common/CornerMasks';
@@ -12,6 +12,7 @@ import { LivePlayerView } from '@/components/player/LivePlayerView';
 import { PreviousPlayerLayer } from '@/components/player/PreviousPlayerLayer';
 import { ControlBar } from '@/components/shell/ControlBar';
 import { DonateButton } from '@/components/shell/DonateButton';
+import { NetworkBanner } from '@/components/shell/NetworkBanner';
 import { useFrameLayout } from '@/hooks/useFrameLayout';
 import { colors } from '@/lib/theme';
 import { openChannelModal, refreshBroadcast, refreshChannelListInBackground } from '@/player/actions';
@@ -35,6 +36,7 @@ export default function LiveScreen() {
   const layout = useFrameLayout();
   const isFullscreen = useUiStore((s) => s.isFullscreen);
   const fsControlsVisible = useUiStore((s) => s.fsControlsVisible);
+  const keyPressed = useUiStore((s) => s.fsActivity > 0);
   const overlayCount = useUiStore((s) => s.overlays.length);
   const firstVisitPicker = useUiStore((s) => s.overlays.includes('channels-first'));
   const donateHasFocusTurn = useUiStore((s) => s.tvFocusArea === 'donate');
@@ -65,7 +67,6 @@ export default function LiveScreen() {
 
   // Fullscreen: the bar hides after 3.5 s; a tap or any remote key shows it
   // (Back too: see useBackHandler).
-  const fsActivity = useUiStore((s) => s.fsActivity);
   const bump = useCallback(() => useUiStore.getState().showFsControls(), []);
   // TV (always fullscreen), like other TV players: while a channel the viewer
   // started is loading (app open, channel switch, Refresh, back from the Watched
@@ -73,21 +74,6 @@ export default function LiveScreen() {
   // after the last key. Automatic changes (the next programme, a recovery reload)
   // leave the bar as it is: hidden stays hidden. Phones keep the plain 3.5 s timer.
   const holdBar = Platform.isTV && videoStarting;
-  const afterStart = useRef(false);
-  useEffect(() => {
-    if (!isFullscreen || overlayCount > 0) return;
-    if (holdBar) {
-      afterStart.current = true;
-      useUiStore.getState().setFsControlsVisible(true);
-      return;
-    }
-    const delay = afterStart.current ? FS_HIDE_AFTER_START_MS : FS_CONTROLS_HIDE_MS;
-    const t = setTimeout(() => {
-      afterStart.current = false;
-      useUiStore.getState().setFsControlsVisible(false);
-    }, delay);
-    return () => clearTimeout(t);
-  }, [isFullscreen, fsActivity, overlayCount, holdBar]);
   useTVEventHandler((evt) => {
     // Focus moves arrive here too; only real remote keys count.
     if (evt.eventType === 'focus' || evt.eventType === 'blur') return;
@@ -103,9 +89,15 @@ export default function LiveScreen() {
   // buttons can't take focus meanwhile; an invisible full-screen target holds it,
   // so OK can't press a button nobody can see.
   const tvBarHidden = Platform.isTV && isFullscreen && !barVisible && phase !== 'error';
+  // TV: the bar is first drawn when something needs it (a remote key, an overlay, an error). Its
+  // SVG icons took the box's main thread ~1 s to create, in the seconds YouTube was starting on
+  // that same thread (2026-11-04). The invisible target below holds focus until then.
+  const [barMounted, setBarMounted] = useState(!Platform.isTV);
+  if (!barMounted && (keyPressed || overlayCount > 0 || previousOpen || phase === 'error')) setBarMounted(true);
 
   return (
     <View style={styles.root}>
+      <FsControlsAutoHide fullscreen={isFullscreen} overlayCount={overlayCount} hold={holdBar} />
       <StatusBar hidden={isFullscreen || previousFullscreen} style="light" />
       {isFullscreen ? <View style={[StyleSheet.absoluteFill, { backgroundColor: '#000' }]} /> : <PageGradient />}
 
@@ -133,17 +125,19 @@ export default function LiveScreen() {
               : { position: 'absolute', left: layout.frameLeft, top: layout.frameTop + layout.videoHeight, width: layout.frameWidth }
           }
         >
-          <ControlBar
-            layout={layout}
-            fullscreen={isFullscreen}
-            onToggleFullscreen={toggleMainFullscreen}
-            onActivity={isFullscreen ? bump : undefined}
-            preferFocus={overlayCount === 0 && !previousOpen && phase !== 'error' && !tvBarHidden && !donateHasFocusTurn}
-            blocked={previousOpen || tvBarHidden}
-          />
+          {barMounted ? (
+            <ControlBar
+              layout={layout}
+              fullscreen={isFullscreen}
+              onToggleFullscreen={toggleMainFullscreen}
+              onActivity={isFullscreen ? bump : undefined}
+              preferFocus={overlayCount === 0 && !previousOpen && phase !== 'error' && !tvBarHidden && !donateHasFocusTurn}
+              blocked={previousOpen || tvBarHidden}
+            />
+          ) : null}
         </View>
 
-        {tvBarHidden ? (
+        {tvBarHidden || !barMounted ? (
           <Focusable
             style={StyleSheet.absoluteFill}
             focusStyle={{}}
@@ -189,8 +183,33 @@ export default function LiveScreen() {
 
       <PreviousPlayerLayer />
       <OverlayHost />
+      <NetworkBanner />
     </View>
   );
+}
+
+/**
+ * Hides the fullscreen bar after a while. Its own component: it follows every remote key, and the
+ * whole screen rendering again with each key delayed the key's own action on the TV box.
+ */
+function FsControlsAutoHide({ fullscreen, overlayCount, hold }: { fullscreen: boolean; overlayCount: number; hold: boolean }) {
+  const fsActivity = useUiStore((s) => s.fsActivity);
+  const afterStart = useRef(false);
+  useEffect(() => {
+    if (!fullscreen || overlayCount > 0) return;
+    if (hold) {
+      afterStart.current = true;
+      useUiStore.getState().setFsControlsVisible(true);
+      return;
+    }
+    const delay = afterStart.current ? FS_HIDE_AFTER_START_MS : FS_CONTROLS_HIDE_MS;
+    const t = setTimeout(() => {
+      afterStart.current = false;
+      useUiStore.getState().setFsControlsVisible(false);
+    }, delay);
+    return () => clearTimeout(t);
+  }, [fullscreen, fsActivity, overlayCount, hold]);
+  return null;
 }
 
 const styles = StyleSheet.create({

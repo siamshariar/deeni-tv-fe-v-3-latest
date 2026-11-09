@@ -7,7 +7,7 @@ import { Platform } from 'react-native';
 
 import { config } from '@/lib/config';
 import { findApiChannel } from '@/lib/schedule/channels';
-import { noteServerDate } from '@/lib/serverClock';
+import { noteServerDate, serverNow } from '@/lib/serverClock';
 import type { ApiChannel, ScheduleResult } from '@/types';
 
 import { createApiToken } from './jwt';
@@ -16,6 +16,14 @@ import { isUsableSchedule, normalizeScheduleResponse } from './normalize';
 /** The request itself may run this long; channel start only waits 10 s for it (web values). */
 export const EXTERNAL_API_TIMEOUT_MS = 120000;
 export const WEB_ROUTE_TIMEOUT_MS = 10000;
+/**
+ * The schedule route answers in ~0.5 s, but inside the app on the TV box a request often
+ * hung until the timeout (a stale pooled connection; curl from the box was fast), which
+ * held "Tuning into your broadcast" 10 s before the built-in schedule took over (2026-11-01).
+ * The built-in schedule is what the route serves while its own API call fails, so wait 3 s.
+ * Deviation: the web waits 10 s.
+ */
+export const WEB_SCHEDULE_TIMEOUT_MS = 3000;
 
 const appVersion = Constants.expoConfig?.version ?? '1.0.0';
 const clientName = Platform.isTV ? 'androidtv' : Platform.OS;
@@ -31,7 +39,17 @@ function authHeaders(): Record<string, string> {
     }
     return {};
   }
-  return { p: createApiToken(config.jwtSecret, userAgent) };
+  // The servers' clock, so a device with a wrong clock still sends a current timestamp.
+  return { p: createApiToken(config.jwtSecret, userAgent, serverNow()) };
+}
+
+/** Browser-like source headers: Cloudflare blocks API requests without a deeni.tv referer. */
+function sourceHeaders(): Record<string, string> {
+  if (!config.apiReferer) return {};
+  const headers: Record<string, string> = { Referer: config.apiReferer };
+  const origin = /^https?:\/\/[^/]+/.exec(config.apiReferer)?.[0];
+  if (origin) headers.Origin = origin;
+  return headers;
 }
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
@@ -58,13 +76,19 @@ async function parseJson(res: Response): Promise<any> {
 
 /** GET with the `p` JWT. An unsigned request that gets a 403 is retried once (web client-fetch). */
 async function apiGet(url: string, timeoutMs: number): Promise<any> {
-  const headers: Record<string, string> = { Accept: 'application/json', ...authHeaders() };
+  const headers: Record<string, string> = { Accept: 'application/json', ...sourceHeaders(), ...authHeaders() };
   let res = await fetchWithTimeout(url, { headers }, timeoutMs);
   if (res.status === 403 && !headers.p) {
-    res = await fetchWithTimeout(url, { headers: { Accept: 'application/json' } }, timeoutMs);
+    res = await fetchWithTimeout(url, { headers: { Accept: 'application/json', ...sourceHeaders() } }, timeoutMs);
   }
-  if (!res.ok) throw new Error(`API ${res.status} for ${url}`);
+  if (!res.ok) throw new Error(`API ${res.status} from ${refusedBy(res)} for ${url}`);
   return parseJson(res);
+}
+
+/** Who refused: Cloudflare's firewall page or the API itself (Express) — tells a blocked request from a bad token. */
+function refusedBy(res: Response): string {
+  if (res.headers.get('x-powered-by')) return 'api';
+  return /cloudflare/i.test(res.headers.get('server') ?? '') ? 'cloudflare' : 'server';
 }
 
 function channelQuery(channelId: string): { lid: string; isQuran: boolean } {
@@ -74,6 +98,12 @@ function channelQuery(channelId: string): { lid: string; isQuran: boolean } {
 
 /** Tier 1: the live schedule straight from the external API. Null on any failure. */
 export async function fetchExternalSchedule(channelId: string): Promise<ScheduleResult | null> {
+  // Without the JWT secret the API refuses every request (403): don't spend the round trip
+  // (~1.5 s on the TV box) before a channel can start.
+  if (!config.jwtSecret) {
+    authHeaders(); // logs the missing-secret warning once
+    return null;
+  }
   const { lid, isQuran } = channelQuery(channelId);
   let url = `${config.apiBase}/live?lid=${lid}`;
   if (isQuran) url += '&iq=true';
@@ -100,7 +130,7 @@ export async function fetchWebRouteSchedule(channelId: string): Promise<Schedule
     const res = await fetchWithTimeout(
       `${config.webBaseUrl}/api/current-video?${params}`,
       { headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' } },
-      WEB_ROUTE_TIMEOUT_MS,
+      WEB_SCHEDULE_TIMEOUT_MS,
     );
     if (!res.ok) return null;
     const data = await parseJson(res);

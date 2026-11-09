@@ -1,5 +1,7 @@
-import { Clock, History, Play } from 'lucide-react-native';
-import { FlatList, Text, View } from 'react-native';
+import Clock from 'lucide-react-native/icons/clock';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import Play from 'lucide-react-native/icons/play';
+import { FlatList, Platform, Text, View } from 'react-native';
 
 import { Focusable } from '@/components/common/Focusable';
 import { useFrameLayout } from '@/hooks/useFrameLayout';
@@ -45,11 +47,16 @@ export function PreviousProgramsModal() {
           <FlatList
             data={videos}
             keyExtractor={(v, i) => `${v.id}-${i}`}
+            // The list holds up to 30 rows; only the ones on screen are built when it opens.
+            initialNumToRender={5}
+            maxToRenderPerBatch={5}
+            windowSize={5}
             style={{ flexGrow: 0, flexShrink: 1 }}
             contentContainerStyle={{ padding: 16 * unit, gap: 8 * unit }}
             renderItem={({ item, index }) => (
               <Focusable
                 onPress={() => previousPlayer.play(item)}
+                onFocus={Platform.isTV ? () => previousPlayer.rowFocused(item.videoId) : undefined}
                 hasTVPreferredFocus={index === 0}
                 accessibilityRole="button"
                 accessibilityLabel={`Play ${item.title}`}

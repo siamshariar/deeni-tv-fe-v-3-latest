@@ -1,4 +1,5 @@
-import { Globe, Sparkles } from 'lucide-react-native';
+import Globe from 'lucide-react-native/icons/globe';
+import Sparkles from 'lucide-react-native/icons/sparkles';
 import { useMemo, useRef, useState, type Ref } from 'react';
 import { FlatList, Keyboard, Platform, Text, TextInput, View, useTVEventHandler, type HWEvent } from 'react-native';
 

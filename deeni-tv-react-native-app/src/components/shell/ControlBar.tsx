@@ -1,4 +1,12 @@
-import { Calendar, Globe, History, Maximize, Minimize, MoreHorizontal, RefreshCw, Volume2, VolumeX } from 'lucide-react-native';
+import Calendar from 'lucide-react-native/icons/calendar';
+import Globe from 'lucide-react-native/icons/globe';
+import History from 'lucide-react-native/icons/rotate-ccw-clock';
+import Maximize from 'lucide-react-native/icons/maximize';
+import Minimize from 'lucide-react-native/icons/minimize';
+import MoreHorizontal from 'lucide-react-native/icons/ellipsis';
+import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import Volume2 from 'lucide-react-native/icons/volume-2';
+import VolumeX from 'lucide-react-native/icons/volume-x';
 import { useState } from 'react';
 import { Platform, StyleSheet, TVFocusGuideView, View, type StyleProp, type ViewStyle } from 'react-native';
 

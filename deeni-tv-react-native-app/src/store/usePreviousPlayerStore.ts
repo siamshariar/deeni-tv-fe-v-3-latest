@@ -24,6 +24,8 @@ interface PreviousPlayerState {
   isMuted: boolean;
   controlsVisible: boolean;
   isFullscreen: boolean;
+  /** Bumped on every resume by the viewer (play/pause button, tap): shows the ▶ flash. */
+  resumeFlash: number;
 }
 
 export const usePreviousPlayerStore = create<PreviousPlayerState>()(() => ({
@@ -41,4 +43,5 @@ export const usePreviousPlayerStore = create<PreviousPlayerState>()(() => ({
   isMuted: false,
   controlsVisible: true,
   isFullscreen: false,
+  resumeFlash: 0,
 }));

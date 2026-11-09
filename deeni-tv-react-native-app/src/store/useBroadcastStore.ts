@@ -8,7 +8,7 @@ import type { VideoProgram } from '@/types';
  *
  * phase:
  * - idle        nothing chosen yet
- * - tuning      the schedule is being fetched ("Tuning into your broadcast...")
+ * - tuning      the schedule is being fetched (the branded cover; phone: logo only, no text)
  * - branded     programme known, video starting (branded WATCHING cover)
  * - playing     the real video is moving
  * - unavailable this programme can't be embedded; waits for the next one
@@ -26,8 +26,14 @@ interface BroadcastState {
   errorMessage: string | null;
   /** Branded cover visible (start, transition, stall, near end). */
   coverVisible: boolean;
+  /** The cover is the end-of-programme "Up next" card (not a loading screen). */
+  endCover: boolean;
   /** Title on the branded cover. */
   coverTitle: string;
+  /** TV: the programme whose picture a loading cover shows; null for a stall (no cover over one). */
+  coverVideoId: string | null;
+  /** TV: the next programme, in the small card during this one's last seconds. */
+  upNextCard: VideoProgram | null;
   /** The WebView may be shown (after the first real movement; web iframeVisible). */
   videoVisible: boolean;
   /**
@@ -54,7 +60,10 @@ export const initialBroadcastState: BroadcastState = {
   history: [],
   errorMessage: null,
   coverVisible: false,
+  endCover: false,
   coverTitle: '',
+  coverVideoId: null,
+  upNextCard: null,
   videoVisible: false,
   videoStarting: false,
   currentTime: 0,

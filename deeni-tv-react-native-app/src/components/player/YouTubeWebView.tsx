@@ -3,7 +3,7 @@ import { Platform, StyleSheet, TVFocusGuideView, View, type StyleProp, type View
 import { WebView, type WebViewMessageEvent } from 'react-native-webview';
 import type { ShouldStartLoadRequest } from 'react-native-webview/lib/WebViewTypes';
 
-import { config } from '@/lib/config';
+import { config, youtubeFlags } from '@/lib/config';
 import { buildPlayerHtml, type PlayerPageMessage, type PlayerRole } from '@/lib/youtube/playerPage';
 import type { EngineRef } from '@/player/engine';
 
@@ -15,6 +15,27 @@ interface Props {
 }
 
 const IS_TV = Platform.isTV;
+const TV_RENDER_SCALE = 1.5;
+
+/** The player page for a role (also the TV's native live player, NativeLivePlayer). */
+export function playerPageSource(role: PlayerRole): { html: string; baseUrl: string } {
+  return {
+    html: buildPlayerHtml({
+      origin: config.playerOrigin,
+      host: config.youtubeHost,
+      role,
+      // When the Up next card shows (TV, a small card) or the end cover (phones, over YouTube's
+      // end screen).
+      nearEndSec: role === 'live' ? (Platform.isTV ? 15 : 3) : 0,
+      endSec: role === 'live' ? 0.5 : 0.3,
+      cropChrome: youtubeFlags.cropChrome,
+      // TV: YouTube in 720p on the 1080p screen (load and decode faster on the slow box).
+      renderScale: IS_TV ? TV_RENDER_SCALE : 1,
+      hideUntilPlaying: IS_TV,
+    }),
+    baseUrl: `${config.playerOrigin}/`,
+  };
+}
 
 /**
  * Display-only WebView running the player page (Safe Kids ShortsPlayer
@@ -29,21 +50,7 @@ export function YouTubeWebView({ engine, role, onMessage, style }: Props) {
   const onMessageRef = useRef(onMessage);
   onMessageRef.current = onMessage;
 
-  const source = useMemo(
-    () => ({
-      html: buildPlayerHtml({
-        origin: config.playerOrigin,
-        host: config.youtubeHost,
-        role,
-        // TV: YouTube end screens (suggested-video cards) start up to 20 s before the
-        // end; the live player covers that stretch. Phones keep 3 s.
-        nearEndSec: role === 'live' ? (Platform.isTV ? 20 : 3) : 0,
-        endSec: role === 'live' ? 0.5 : 0.3,
-      }),
-      baseUrl: `${config.playerOrigin}/`,
-    }),
-    [role],
-  );
+  const source = useMemo(() => playerPageSource(role), [role]);
 
   const rebuild = useCallback(() => {
     engine.onPageReset();
@@ -66,8 +73,10 @@ export function YouTubeWebView({ engine, role, onMessage, style }: Props) {
     } catch {
       return;
     }
+    // The page's script runs: send what was queued (onLoadEnd also does, much later).
+    if (msg.type === 'boot') engine.onPageLoaded();
     onMessageRef.current(msg);
-  }, []);
+  }, [engine]);
 
   // Only the inline page itself may load in the top frame. YouTube's iframe is
   // a sub-frame (iOS reports it here; Android never does). Anything else, e.g.

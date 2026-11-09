@@ -7,8 +7,9 @@
  */
 import { Platform } from 'react-native';
 
-import { youtubeFlags } from '@/lib/config';
+import { YOUTUBE_ICON_MS, youtubeFlags } from '@/lib/config';
 import { playerCommand, type PlayerPageMessage } from '@/lib/youtube/playerPage';
+import { prefetchThumbnail } from '@/lib/youtube/thumbnail';
 import { usePreviousPlayerStore } from '@/store/usePreviousPlayerStore';
 import { useUiStore } from '@/store/useUiStore';
 import type { VideoProgram } from '@/types';
@@ -20,9 +21,11 @@ import { EngineRef } from './engine';
 const PLAY_WATCHDOG_MS = 4000;
 const PAGE_LOAD_GRACE_MS = 12000;
 const MAX_BUFFERING_WAIT_MS = 12000;
-// Web 3000. On the phone YouTube's start overlay (title bar, pause glyph, logo)
-// was still up after 5 s of playback (Realme RMX2030), so the phone waits 6 s.
-const REVEAL_AFTER_PLAYING_MS = Platform.isTV ? 3000 : 6000;
+// Web 3000. With youtubeFlags.cropChrome YouTube's top bar and bottom strip are out of
+// view: the cover lifts once the video really plays (sound held until then) and
+// PlaybackIndicator covers YouTube's centre icon. Without it: on the phone YouTube's start
+// overlay (title bar, pause glyph, logo) was still up after 5 s of playback (Realme RMX2030).
+const REVEAL_AFTER_PLAYING_MS = youtubeFlags.cropChrome ? 300 : Platform.isTV ? 3000 : 6000;
 const REVEAL_MAX_WAIT_MS = 20000;
 const STALL_COVER_MS = 1200;
 // The web shows Play when nothing plays after 4 s (iOS blocks its autoplay) and
@@ -33,9 +36,18 @@ const STALL_COVER_MS = 1200;
 const MAX_START_WAIT_MS = Platform.isTV ? 30000 : MAX_BUFFERING_WAIT_MS;
 // After a stall, a resume or a jump, YouTube's title bar, play glyph and "More
 // videos" fade out only after it has played a moment: still up ~1 s after 3 s of
-// movement on the TV box and ~4 s on the phone (screen-recorded frames), so both wait 5 s.
-const STALL_REVEAL_MOVE_MS = 5000;
+// movement on the TV box and ~4 s on the phone (screen-recorded frames), so both
+// waited 5 s. With the crop only the centre icon is left, under PlaybackIndicator.
+const STALL_REVEAL_MOVE_MS = youtubeFlags.cropChrome ? 300 : 5000;
 export const SKIP_SECONDS = 10;
+const ROW_REST_MS = 500;
+const LATE_STOP_MS = 12000;
+// After a resume, how long a not-yet-moving video stays on screen before the stall cover.
+const RESUME_GRACE_MS = YOUTUBE_ICON_MS + 2000;
+// Once the picture shows, only a freeze this long brings the cover back, and none in the first
+// seconds after a cover lifts (user request 2026-11-03: no repeated loading while playing).
+const STALL_COVER_AFTER_MS = Platform.isTV ? 5000 : 2500;
+const NO_STALL_COVER_AFTER_REVEAL_MS = Platform.isTV ? 10000 : 4000;
 
 class PreviousController {
   readonly engine = new EngineRef();
@@ -43,6 +55,8 @@ class PreviousController {
   private lastTime = -1;
   private lastMoveAt = 0;
   private movingSince = 0;
+  /** Phone: when the first frame was reported; the start cover lifts only after a movement past it. */
+  private firstFrameAt = 0;
   private loadStartedAt = 0;
   private ytState = -1;
   private bufferingSince = 0;
@@ -50,31 +64,90 @@ class PreviousController {
   private gaveUp = false;
   private watchdog: ReturnType<typeof setTimeout> | null = null;
 
+  /** The page's cover hold: silent while the loading or stall cover is up. */
+  private coverHeld = false;
+  /** TV: the Watched list is open. */
+  private listOpen = false;
+  private rowTimer: ReturnType<typeof setTimeout> | null = null;
+  private lateStop: ReturnType<typeof setTimeout> | null = null;
+  /** No stall cover until then after a resume (togglePlay) or a cover lifting. */
+  private resumeGraceUntil = 0;
+  /** No internet: the start watchdog waits instead of giving up. */
+  private offline = false;
+  /** Back online: one immediate seek nudge for a stall in the next minute (see broadcastController). */
+  private onlineAt = 0;
+  private reconnectNudged = false;
+
   constructor() {
     setInterval(() => this.tick(), 250);
+    // TV shows no cover over a stall (PreviousPlayerLayer): the page stays as it is.
+    usePreviousPlayerStore.subscribe((s) => this.setCoverHold(s.isOpen && (s.isLoading || (!Platform.isTV && s.isStalled))));
+    if (Platform.isTV) {
+      // The list closed with no programme chosen: the live player paused for it comes back.
+      useUiStore.subscribe((s) => {
+        const open = s.overlays.includes('previous-list');
+        if (this.listOpen && !open && !usePreviousPlayerStore.getState().isOpen) broadcast.previousClosed();
+        this.listOpen = open;
+      });
+    }
+  }
+
+  /**
+   * TV, the list is opening: the live player pauses until it closes (back with a seek, as after
+   * the Watched player). The box plays one video at a time: next to the live one a programme took
+   * 7–10 s to load, and the live video paused ~2 s anyway when its first frame came (2026-11-04).
+   */
+  listOpening(): void {
+    this.listOpen = true;
+    broadcast.previousOpened();
+  }
+
+  /** TV: the row the viewer rests on is the one to have ready (a moment later, not on every step past it). */
+  rowFocused(videoId: string): void {
+    prefetchThumbnail(videoId);
+    if (this.rowTimer) clearTimeout(this.rowTimer);
+    this.rowTimer = setTimeout(() => {
+      this.rowTimer = null;
+      if (this.listOpen) this.warm(videoId);
+    }, ROW_REST_MS);
+  }
+
+  private setCoverHold(on: boolean): void {
+    if (this.coverHeld === on) return;
+    this.coverHeld = on;
+    this.engine.run(playerCommand.coverHold(on));
   }
 
   /** The list opened: create the page (first time) and cue the first row. */
   warm(firstVideoId: string | undefined): void {
-    // TV: no warm-up. A second YouTube page loading next to the live one made
-    // the live video on the test box (4 GB, HiSilicon) stall for ~20 s, with
-    // YouTube's own controls and then a black picture. The live player is
-    // stopped anyway while a programme plays on TV, so the page is created
-    // when one is chosen (play() below; commands wait in the engine queue).
-    if (Platform.isTV) return;
+    this.cancelLateStop();
+    // TV too (2026-11-03): creating the page only when a programme was chosen made its first
+    // start take ~16 s on the test box; the user wants it to start right away. Earlier a second
+    // page loading next to the live one stalled the live video behind the list (~20 s, YouTube's
+    // controls showing); the live player now has a stall cover, and it is stopped anyway once a
+    // programme is chosen.
     const store = usePreviousPlayerStore.getState();
     if (!store.isCreated) usePreviousPlayerStore.setState({ isCreated: true });
     if (firstVideoId && !store.isOpen && !store.video) {
       usePreviousPlayerStore.setState({ warmVideoId: firstVideoId });
-      this.engine.run(playerCommand.load(firstVideoId, 0, false, true));
+      // Started muted and held on its first frame, so a tap only resumes it: a cued video still
+      // took ~10 s to start on the TV box and ~2.8 s on the phone (2026-11-03).
+      this.engine.run(playerCommand.preload(firstVideoId));
     }
   }
 
   play(video: VideoProgram): void {
+    if (this.rowTimer) clearTimeout(this.rowTimer);
+    this.rowTimer = null;
+    this.cancelLateStop();
+    // TV: YouTube first. Sent after the update below it waited behind the player layer's draw,
+    // and reached the page ~1.2 s after the key on the box (2026-11-04).
+    if (Platform.isTV) this.engine.run(playerCommand.load(video.videoId, 0, true, true));
     this.expectedId = video.videoId;
     this.lastTime = -1;
     this.movingSince = 0;
     this.lastMoveAt = 0;
+    this.firstFrameAt = 0;
     this.ytState = -1;
     this.bufferingSince = 0;
     this.gaveUp = false;
@@ -97,8 +170,18 @@ class PreviousController {
     broadcast.previousOpened();
     // TV creates the page only now (no warm-up): give it time to load first.
     const pageWait = this.engine.isReady ? 0 : PAGE_LOAD_GRACE_MS;
-    this.engine.run(playerCommand.load(video.videoId, 0, true, true));
+    if (!Platform.isTV) this.engine.run(playerCommand.load(video.videoId, 0, true, true));
     this.armWatchdog(PLAY_WATCHDOG_MS + pageWait);
+  }
+
+  /** Connectivity: offline the start watchdog waits; back online a stuck video is nudged. */
+  setOnline(online: boolean): void {
+    this.offline = !online;
+    if (!online) return;
+    this.onlineAt = Date.now();
+    this.reconnectNudged = false;
+    const s = usePreviousPlayerStore.getState();
+    if (s.isOpen && s.isPlaying && !s.isEnded && Date.now() - this.lastMoveAt > 3000) this.engine.run(playerCommand.play());
   }
 
   togglePlay(): void {
@@ -116,8 +199,11 @@ class PreviousController {
       this.engine.run(playerCommand.pause());
       usePreviousPlayerStore.setState({ isPlaying: false, isStalled: false });
     } else {
+      // Play / pause is only play / pause: no loading screen on resume (user request
+      // 2026-11-03). The ▶ flash covers YouTube's centre icon (and its spinner) meanwhile.
       this.engine.run(playerCommand.play());
-      usePreviousPlayerStore.setState({ isPlaying: true, isStalled: true });
+      this.resumeGraceUntil = Date.now() + RESUME_GRACE_MS;
+      usePreviousPlayerStore.setState((st) => ({ isPlaying: true, isStalled: false, resumeFlash: st.resumeFlash + 1 }));
       this.armWatchdog();
     }
   }
@@ -155,7 +241,18 @@ class PreviousController {
     if (!usePreviousPlayerStore.getState().isOpen) return;
     this.clearWatchdog();
     this.engine.run(playerCommand.mute(true));
-    this.engine.run(playerCommand.stop());
+    if (Platform.isTV) {
+      // The live player first, and only paused here: stopping tears YouTube's player down on the
+      // page thread both pages share, and held the live seek back ~2.8 s on the box (2026-11-04).
+      this.engine.run(playerCommand.pause());
+      broadcast.previousClosed();
+      this.lateStop = setTimeout(() => {
+        this.lateStop = null;
+        this.engine.run(playerCommand.stop());
+      }, LATE_STOP_MS);
+    } else {
+      this.engine.run(playerCommand.stop());
+    }
     this.expectedId = '';
     this.gaveUp = false;
     usePreviousPlayerStore.setState({
@@ -179,6 +276,8 @@ class PreviousController {
   }
 
   onPlayerMessage(msg: PlayerPageMessage): void {
+    // A rebuilt page starts unheld.
+    if (msg.type === 'ready' && this.coverHeld) this.engine.run(playerCommand.coverHold(true));
     if (!('id' in msg) || msg.id !== this.expectedId) {
       if (msg.type === 'log') console.log('[previous page]', msg.msg);
       return;
@@ -188,6 +287,16 @@ class PreviousController {
         this.clearWatchdog();
         const { isMuted } = usePreviousPlayerStore.getState();
         if (youtubeFlags.autoUnmute && !isMuted) this.engine.run(playerCommand.mute(false));
+        // Phone: playback counts from its first frame, so the cover lifts 0.3 s after it once a
+        // progress report shows it moving (the TV waits for the reported movement; see
+        // broadcastController.onFirstFrame). A resumed preload reports PLAYING ~1 s before its
+        // held frame moves: lifting at 0.3 s showed that frame frozen, without sound.
+        if (!Platform.isTV) {
+          const now = Date.now();
+          this.firstFrameAt = now;
+          this.lastMoveAt = now;
+          if (!this.movingSince) this.movingSince = now;
+        }
         this.lateStart();
         usePreviousPlayerStore.setState({ isPlaying: true });
         break;
@@ -195,6 +304,11 @@ class PreviousController {
       case 'state':
         this.noteState(msg.state);
         if (msg.state === 1) {
+          // TV: PLAYING counts as movement, so the cover lifts in a tick or two (sound with it).
+          if (Platform.isTV) {
+            this.lastMoveAt = Date.now();
+            if (!this.movingSince) this.movingSince = this.lastMoveAt;
+          }
           this.lateStart();
           usePreviousPlayerStore.setState({ isPlaying: true, isEnded: false });
         }
@@ -220,6 +334,8 @@ class PreviousController {
         this.engine.run(playerCommand.pause());
         break;
       case 'error':
+        // The IFrame API script failed to load: the page tries again by itself.
+        if (msg.code === 0) break;
         console.warn('Previous player error', msg.code);
         this.clearWatchdog();
         usePreviousPlayerStore.setState({ isLoading: false });
@@ -250,17 +366,28 @@ class PreviousController {
     if (now - this.lastMoveAt > STALL_COVER_MS || buffering) this.movingSince = 0;
     const frozen = s.isPlaying && !s.isEnded && (now - this.lastMoveAt > STALL_COVER_MS || buffering);
     const moved = this.movingSince ? now - this.movingSince : 0;
+    if (!this.reconnectNudged && now - this.onlineAt < 60000 && s.isPlaying && !s.isEnded && !s.isLoading && now - this.lastMoveAt > 1500) {
+      this.reconnectNudged = true;
+      this.engine.run(playerCommand.seek(s.currentTime + 0.1));
+      this.engine.run(playerCommand.play());
+    }
     if (s.isLoading) {
-      if (moved >= REVEAL_AFTER_PLAYING_MS || now - this.loadStartedAt >= REVEAL_MAX_WAIT_MS) {
+      if ((moved >= REVEAL_AFTER_PLAYING_MS && this.lastMoveAt > this.firstFrameAt) || now - this.loadStartedAt >= REVEAL_MAX_WAIT_MS) {
         // Lifted at the cap while still frozen: the stall cover takes over in the same update.
+        if (!frozen) this.resumeGraceUntil = Math.max(this.resumeGraceUntil, now + NO_STALL_COVER_AFTER_REVEAL_MS);
         usePreviousPlayerStore.setState({ isLoading: false, isStalled: frozen });
       }
       return;
     }
     if (!s.isStalled) {
-      if (frozen) usePreviousPlayerStore.setState({ isStalled: true });
+      // Only a real stall brings the cover back, never right after a resume or a reveal.
+      const frozenLong =
+        s.isPlaying && !s.isEnded &&
+        (now - this.lastMoveAt > STALL_COVER_AFTER_MS || (this.ytState === 3 && this.bufferingSince > 0 && now - this.bufferingSince > STALL_COVER_AFTER_MS));
+      if (frozenLong && now >= this.resumeGraceUntil) usePreviousPlayerStore.setState({ isStalled: true });
     } else if (!s.isPlaying || (!frozen && moved >= STALL_REVEAL_MOVE_MS)) {
       // Paused (the thumbnail covers it then) or playing again.
+      if (s.isPlaying) this.resumeGraceUntil = Math.max(this.resumeGraceUntil, now + NO_STALL_COVER_AFTER_REVEAL_MS);
       usePreviousPlayerStore.setState({ isStalled: false });
     }
   }
@@ -285,7 +412,7 @@ class PreviousController {
       if (!s.isOpen || !s.isPlaying || this.lastMoveAt > armedAt) return;
       // PLAYING without movement is a stall (cover), ENDED has its own handler.
       if (this.ytState === 1 || this.ytState === 0) return;
-      if (Date.now() - capFrom < MAX_START_WAIT_MS) {
+      if (this.offline || Date.now() - capFrom < MAX_START_WAIT_MS) {
         this.watchdog = setTimeout(check, PLAY_WATCHDOG_MS);
         return;
       }
@@ -301,6 +428,11 @@ class PreviousController {
     this.gaveUp = false;
     this.loadStartedAt = Date.now();
     usePreviousPlayerStore.setState({ isPlaying: true, isLoading: true, isEnded: false });
+  }
+
+  private cancelLateStop(): void {
+    if (this.lateStop) clearTimeout(this.lateStop);
+    this.lateStop = null;
   }
 
   private clearWatchdog(): void {

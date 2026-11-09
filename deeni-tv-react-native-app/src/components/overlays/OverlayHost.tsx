@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { BackHandler, StyleSheet, ToastAndroid, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { BackHandler, Platform, StyleSheet, ToastAndroid, View } from 'react-native';
 
 import { previousPlayer } from '@/player/previousController';
 import { ALWAYS_FULLSCREEN, setMainFullscreen, setPreviousFullscreen } from '@/player/fullscreen';
@@ -35,6 +35,10 @@ function renderOverlay(id: OverlayId) {
 /** Every overlay, in opening order (newest on top). */
 export function OverlayHost() {
   const overlays = useUiStore((s) => s.overlays);
+  // TV: the menu is first built with the bar (index.tsx): its icons are no part of the first screen.
+  const wanted = useUiStore((s) => s.fsActivity > 0 || s.overlays.length > 0);
+  const [menuMounted, setMenuMounted] = useState(!Platform.isTV);
+  if (wanted && !menuMounted) setMenuMounted(true);
   return (
     <>
       {overlays.map((id) => (
@@ -42,7 +46,7 @@ export function OverlayHost() {
           {renderOverlay(id)}
         </View>
       ))}
-      <MenuDrawer />
+      {menuMounted ? <MenuDrawer /> : null}
     </>
   );
 }

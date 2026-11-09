@@ -14,16 +14,27 @@ import { useUiStore } from '@/store/useUiStore';
 import { broadcast } from './broadcastController';
 import { previousPlayer } from './previousController';
 
-/** Web: menu items close the drawer first, then open the target after 300 ms. */
-export const MENU_TARGET_DELAY_MS = 300;
+/** Web: menu items close the drawer first, then open the target after 300 ms (TV: no slide, at once). */
+export const MENU_TARGET_DELAY_MS = Platform.isTV ? 0 : 300;
 
 export function openSchedule(): void {
   useUiStore.getState().open('schedule');
 }
 
+/**
+ * Phone: the Watched player's page is created (first time) and cued after the list is on
+ * screen. Doing it in the same frame as the list made the list take ~1 s to open (user
+ * report, 2026-11-01). A row tapped sooner still works: play() creates the page itself.
+ */
+const WARM_AFTER_OPEN_MS = 300;
+
 export function openPreviousList(): void {
+  const first = useBroadcastStore.getState().history[0]?.videoId;
+  // TV: its commands go first. The page is usually there already (prepareWatchedPlayer), and the
+  // box needs every second to load the programme before one is picked.
+  if (Platform.isTV) previousPlayer.listOpening();
   useUiStore.getState().open('previous-list');
-  previousPlayer.warm(useBroadcastStore.getState().history[0]?.videoId);
+  setTimeout(() => previousPlayer.warm(first), Platform.isTV ? 0 : WARM_AFTER_OPEN_MS);
 }
 
 /** In-player Channel modal; refreshes the list in the background (web handleOpenChannelSelector). */

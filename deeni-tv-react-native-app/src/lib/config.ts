@@ -25,8 +25,13 @@ export const config = {
   webBaseUrl: process.env.EXPO_PUBLIC_WEB_BASE_URL ?? 'https://www.deeni.tv',
   /** Origin of the inline YouTube player page (page baseUrl, `origin`, `widget_referrer`). */
   playerOrigin: process.env.EXPO_PUBLIC_PLAYER_ORIGIN || 'https://www.deeni.tv',
-  /** YouTube embed host: 'https://www.youtube.com' or 'https://www.youtube-nocookie.com'. */
-  youtubeHost: process.env.EXPO_PUBLIC_YOUTUBE_HOST || 'https://www.youtube.com',
+  /**
+   * YouTube embed host: 'https://www.youtube.com' or 'https://www.youtube-nocookie.com'. The
+   * privacy-enhanced host by default (user request 2026-11-16): it doesn't draw the uploader's
+   * end screen (suggested-video, channel and playlist tiles over a video's last 5–20 s), which
+   * www.youtube.com draws over every embed with no way to turn it off (tested in Chrome).
+   */
+  youtubeHost: process.env.EXPO_PUBLIC_YOUTUBE_HOST || 'https://www.youtube-nocookie.com',
 } as const;
 
 /**

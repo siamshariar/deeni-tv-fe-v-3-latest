@@ -81,6 +81,8 @@ const WATCHED_PREP_DELAY_MS = 8000;
 // Chromium dropped its decoder, and the running video stuttered (2026-11-04).
 const NEXT_CREATE_S = 40;
 const NEXT_PREPARE_S = 15;
+/** The Up next card shows in a programme's last 15 s (page nearEndSec); with more left than this it goes. */
+const UP_NEXT_KEEP_S = 20;
 const REJOIN_DRIFT_S = 20;
 const REJOIN_API_WAIT_MS = 8000;
 // TV: a few seconds more. Every catch-up on the box is a seek of ~4 s under the cover (after a
@@ -656,6 +658,10 @@ class BroadcastController {
     this.lastTime = current;
     const patch: Partial<ReturnType<typeof useBroadcastStore.getState>> = { currentTime: current };
     if (duration > 0) patch.duration = duration;
+    // The Up next card belongs to a programme's last seconds: whatever plays now is not near its
+    // end, so it goes, by whichever way the next programme came in (user report 2026-11-16: it
+    // stayed up after the next programme started).
+    if (duration > 0 && duration - current > UP_NEXT_KEEP_S && useBroadcastStore.getState().upNextCard) patch.upNextCard = null;
     useBroadcastStore.setState(patch);
     if (Platform.isTV) this.prepareNextProgram(now, duration - current);
   }
@@ -943,9 +949,29 @@ class BroadcastController {
     this.previousActive = false;
     const { channelId } = useBroadcastStore.getState();
     if (Platform.isTV) {
-      // Paused under the Watched player: back at the broadcast position with a seek, under the
-      // stall cover (silent) until it plays (coverTick, which also catches up).
-      const target = this.broadcastPosition(Date.now());
+      const now = Date.now();
+      const target = this.broadcastPosition(now);
+      // Only paused under the Watched list / player: it plays on from where it stopped, with its
+      // sound, and no cover of ours (user report 2026-11-16: the loading screen on every close
+      // looked like a reload of the channel). More than START_CORRECTION_S behind the broadcast it
+      // first jumps there; YouTube shows its own spinner while it buffers, as for any stall on TV.
+      if (this.firstFrameSeen && target !== null && !useBroadcastStore.getState().coverVisible) {
+        const behind = target - Math.max(0, this.lastTime);
+        this.watchTime = Math.max(0, this.lastTime);
+        this.watchAt = now;
+        this.lastMoveAt = now; // it resumes now: no stall yet
+        this.bufferingSince = 0;
+        this.ladderStep = 0;
+        this.userMuted = false;
+        this.engine.run(playerCommand.hold(false));
+        this.engine.run(playerCommand.mute(false));
+        if (behind > START_CORRECTION_S) this.seekAhead(target);
+        this.engine.run(playerCommand.play());
+        useBroadcastStore.setState({ isMuted: false });
+        return;
+      }
+      // A cover was up when it paused (a start or a stall): back at the broadcast position with a
+      // seek, under the stall cover (silent) until it plays (coverTick, which also catches up).
       if (this.firstFrameSeen && target !== null) {
         this.stallCover = true;
         this.movingSince = 0;

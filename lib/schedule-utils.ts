@@ -752,6 +752,12 @@ export function findApiChannel(channelId: string): ApiChannel | undefined {
 }
 
 /**
+ * API localizationIds that mean a language the built-in data knows by another id (2026-11-16: the
+ * API's English channel came back as localizationId 2; the built-in English programmes are 6).
+ */
+const API_LID_ALIASES: Record<string, string> = { '2': '6' }
+
+/**
  * Map a channel id to its entry in CHANNELS. The player uses API channel ids
  * ('3'), the embedded data uses local ids ('english-1'); the two are matched
  * by language (localizationId) and the Quran flag. Pass `hint` when the
@@ -766,8 +772,9 @@ export function resolveLocalChannelId(
     ? { localizationId: String(hint.lid), isQuran: hint.isQuran ?? null }
     : findApiChannel(channelId)
   if (!apiChannel) return channelId
+  const lid = API_LID_ALIASES[String(apiChannel.localizationId)] ?? String(apiChannel.localizationId)
   const match = CHANNELS.find(c =>
-    String(getChannelLid(c.id)) === String(apiChannel.localizationId) &&
+    String(getChannelLid(c.id)) === lid &&
     isQuranChannel(c.id) === (apiChannel.isQuran === true)
   )
   return match?.id ?? channelId

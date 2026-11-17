@@ -93,13 +93,12 @@ class PreviousController {
   }
 
   /**
-   * TV, the list is opening: the live player pauses until it closes (back with a seek, as after
-   * the Watched player). The box plays one video at a time: next to the live one a programme took
-   * 7–10 s to load, and the live video paused ~2 s anyway when its first frame came (2026-11-04).
+   * TV, the list is opening: only a popup over the live player, which plays on with its sound
+   * (user request 2026-11-16; it used to pause here, from 2026-11-04, because next to the live one
+   * a programme took 7–10 s to load). The live player pauses once a programme is picked (play).
    */
   listOpening(): void {
     this.listOpen = true;
-    broadcast.previousOpened();
   }
 
   /** TV: the row the viewer rests on is the one to have ready (a moment later, not on every step past it). */

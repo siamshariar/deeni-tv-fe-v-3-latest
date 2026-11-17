@@ -9,6 +9,7 @@ import { formatDuration } from '@/lib/schedule-utils'
 import { useState, useEffect, useRef, useCallback, useImperativeHandle } from 'react'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useFullscreen } from '@/hooks/use-fullscreen'
+import { YT_EMBED_HOST } from '@/hooks/use-youtube-player'
 import { playerFrameStyle, lockPageScroll } from '@/lib/player-layout'
 
 interface PreviousVideosModalProps {
@@ -539,6 +540,7 @@ const PreviousVideoPlayer = ({
       containerRef.current.appendChild(div)
 
       ytPlayerRef.current = new window.YT.Player(div.id, {
+        host: YT_EMBED_HOST,
         width: '100%',
         height: '100%',
         videoId: initialVideoId,

@@ -142,7 +142,7 @@ export function buildPlayerHtml(config: PlayerPageConfig): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <link rel="preconnect" href="https://www.youtube.com">
-<link rel="preconnect" href="https://www.google.com">
+${config.host !== 'https://www.youtube.com' ? `<link rel="preconnect" href="${config.host}">\n` : ''}<link rel="preconnect" href="https://www.google.com">
 <link rel="preconnect" href="https://i.ytimg.com">
 <style>
   html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; }

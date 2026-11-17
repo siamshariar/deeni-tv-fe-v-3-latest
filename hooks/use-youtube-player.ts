@@ -31,7 +31,12 @@ declare global {
 // prime the iOS WKWebView autoplay context before the real content loads.
 // Using a well-known short video (YouTube's own "YouTube" channel intro clip).
 const IOS_PRIMER_VIDEO_ID = 'flt8T_0CD1A'
-const YT_EMBED_HOST = 'https://www.youtube.com'
+// YouTube's privacy-enhanced embed host (official, see YouTube Help "Embed videos & playlists").
+// It plays the same player but doesn't draw the uploader's end screen (suggested-video, channel and
+// playlist tiles over a video's last 5-20 s), which www.youtube.com draws over every embed with no
+// way to turn it off (tested 2026-11-16/17; same host as the React Native app). The iframe_api
+// script still loads from www.youtube.com. Used by the main player and the previous-program player.
+export const YT_EMBED_HOST = 'https://www.youtube-nocookie.com'
 
 export function useYouTubePlayer(opts: { autoLoad?: boolean } = { autoLoad: true }) {
   const playerRef = useRef<any>(null)
